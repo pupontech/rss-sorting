@@ -1,0 +1,33 @@
+# Security review — source audit snapshot
+
+**Scope:** read-only review of the checked-in `xExtension-ArticleTopics` PHP/template files against the hard requirements in `PROMPT.md`, including configuration handling, LLM transport, prompt construction, worker state, label ownership, and retention. This is a source review, not a penetration test or a certification. No source changes or tests were made for this review. Findings are recorded for the implementation owner; other agents are editing implementation areas concurrently.
+
+## Requirements and observed controls
+
+| Requirement | Source observation | Snapshot |
+|---|---|---|
+| Ownership | `_at_owned` records `(id_entry, id_tag)`. Add/remove pairs and ownership writes share a transaction. Existing pairs are left unclaimed; reclassification and retention delete only owned pairs. | Control present in reviewed worker/DAO paths. Concurrent manual edits are not tested. |
+| Secrets | API key is configured per user; the password field renders blank and supports keeping the stored value. Authorization header is added only to the request to the configured endpoint. Provider errors surface as HTTP status/generic transport errors; worker output does not include response bodies. Cache key hashes configuration rather than persisting a plaintext key in cache records. | No intentional key output found in reviewed paths. Filesystem/database access to FreshRSS user configuration remains security-sensitive. |
+| CSRF and endpoint access | The configure template includes FreshRSS's CSRF token field and standard form. Configuration handling uses FreshRSS's extension settings pathway. | FreshRSS auth/CSRF integration observed in template; browser-level access-control behavior was not exercised. |
+| Endpoint-only requests | LLM client uses cURL POST, disables redirects, and makes no article-URL fetch. API key is sent in the Authorization header to the configured URL. | No secondary outbound request path found in reviewed extension code. URL scheme/host restrictions were not confirmed; endpoint configuration is a powerful trust boundary. |
+| Prompt injection | Prompt states article data is untrusted; content/tags are JSON encoded into a distinct data payload. Server validates model category names against enabled taxonomy and rejects malformed output. | Defense in depth exists; model behavior cannot be guaranteed. Fixture evidence is in historical M2 report. |
+| Admin actions | Configure, health-check, preview, and backfill forms include FreshRSS CSRF token fields. The settings handler validates newly submitted provider URLs as HTTP/HTTPS. Health check/preview use bounded requests and disable redirects. | Source controls observed; browser auth/CSRF behavior and handling of pre-existing stored URLs were not exercised. |
+| Update/crash ownership | Label pair and ownership row are transactionally coupled. State writes use a temporary file, lock, flush, optional fsync, and rename. Input fingerprints support reclassification of changed committed articles. | Design controls present. Abrupt process termination recovery and concurrent manual label changes are not established by this read-only audit. |
+| Retention | Cleanup queries only rows in `_at_owned`, removes their matching entry-tag pair and ownership row in a transaction, and follows keep period or configured days. | Manual associations are not targeted by the reviewed cleanup query. Interaction with FreshRSS purge timing and other label retention was not measured here. |
+
+## Risks and follow-up
+
+1. **Configured endpoint trust and URL validation:** the current settings handler accepts HTTP/HTTPS URLs, and redirects are disabled. There is no host allowlist, and the worker transport uses the stored URL directly; older/directly edited configuration is not revalidated there. Local/self-hosted providers are an intended use, so define the supported host policy deliberately. Never configure an untrusted endpoint: it receives article text and the API key.
+2. **Local data access:** API credentials live in FreshRSS user configuration; state/lock files and ownership tables contain per-user activity and label mappings. Protect FreshRSS data directories and database backups with the same care as credentials.
+3. **Diagnostic retention:** retry state stores a bounded `last_error`. Current provider client errors are generic/status-oriented, but future exceptions must not include Authorization headers, request payloads, or article bodies. Diagnostics are not currently surfaced through an admin UI.
+4. **Operational evidence:** browser authentication/CSRF behavior, process-kill recovery, multi-database behavior, and concurrent manual edits need explicit verification before a security release gate can be marked complete.
+5. **Backfill control path:** the form submits `last_7_days` / `taxonomy_changed`; the service accepts `7d` / `taxonomy`. The CLI has no backfill-job execution path. Admin actions can create state but are not shown to complete a backfill. Align and test these contracts before enabling this UI for production users.
+6. **Preview data flow:** the preview UI states supplied text is not stored, and the service does not apply labels; in LLM modes the text is still sent to the configured endpoint. Ensure that distinction is clear to operators and verify the response rendering path before release.
+
+## Conclusion
+
+The reviewed source has direct controls for pair ownership, request redirection, bounded content, server-side taxonomy validation, and owned-label retention. The audit does not establish Milestone 4 completion: protocol/host policy, operational verification, CI/PHPStan, and release packaging are not evidenced here. This snapshot must not be read as a broad security guarantee or as completion of the requested release security gate.
+
+## Final integration evidence
+
+The backfill scope mappings and CLI queue runner are fixed. Authenticated headless Edge checks passed health/preview, topic changes/save, hidden saved key, prefix preservation, backfill enqueue, and invalid CSRF rejection (403). FreshRSS CSP blocks inline scripts; assets now use getFileUrl and Minz_View append hooks. Full SQLite integration demonstrated forced worker interruption/recovery and preserved manual/read/star state. Two-round Luna review approved; see review-ledger.md. This is not evidence for PostgreSQL/MySQL, concurrent external manual edits, Android rendering or real-feed model accuracy.

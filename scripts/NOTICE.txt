@@ -1,0 +1,1 @@
+Article Topics is an independent FreshRSS extension. Its source is distributed under GNU General Public License version 3 or later; see LICENSE. It does not include FreshRSS source code. FreshRSS remains a separate project distributed under its own license.

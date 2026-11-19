@@ -1,0 +1,5 @@
+<?php
+
+function fail(string $message, int $exitCode = 1): never {}
+
+function cliInitUser(string $username): string { return $username; }

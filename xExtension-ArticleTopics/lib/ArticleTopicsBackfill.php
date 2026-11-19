@@ -83,6 +83,7 @@ final class ArticleTopicsBackfill {
 					$this->recordResult($jobId, $id, 'skipped', null, 0, null);
 					continue;
 				}
+				$beforeCalls = $classifier->llmCalls();
 				try {
 					if (class_exists('ArticleTopicsRetention') && ArticleTopicsRetention::isExpired($entry, $this->config)) {
 						$this->recordResult($jobId, $id, 'skipped', [], 0, null);
@@ -99,7 +100,7 @@ final class ArticleTopicsBackfill {
 					}
 					$this->recordResult($jobId, $id, $result['names'] === [] ? 'skipped' : 'labelled', $result['names'], (int)$result['llm_calls'], null);
 				} catch (Throwable $error) {
-					$this->recordResult($jobId, $id, 'failed', null, 0, $error->getMessage());
+					$this->recordResult($jobId, $id, 'failed', null, $classifier->llmCalls() - $beforeCalls, $error->getMessage());
 				}
 			}
 			$job = $this->getJob($jobId);

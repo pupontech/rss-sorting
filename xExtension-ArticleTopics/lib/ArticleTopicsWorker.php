@@ -128,6 +128,7 @@ final class ArticleTopicsWorker {
 					ArticleTopicsStore::writeState($this->dir, $state);
 					continue;
 				}
+				$beforeCalls = $this->classifier->llmCalls();
 				try {
 					if (class_exists('ArticleTopicsRetention') && ArticleTopicsRetention::isExpired($entry, $this->config)) {
 						// Old committed entries are intentionally not sent to a provider or re-labelled.
@@ -159,6 +160,7 @@ final class ArticleTopicsWorker {
 					$state['fingerprints'][(string)$id] = $key;
 					unset($state['failures'][(string)$id]);
 				} catch (Throwable $e) {
+					$state['metrics']['llm_calls'] = (int)($state['metrics']['llm_calls'] ?? 0) + $this->classifier->llmCalls() - $beforeCalls;
 					$attempts = $this->recordFailure($state, $id, $e);
 					if ($attempts >= max(1, (int)($this->config['max_attempts'] ?? $this->config['retry_max'] ?? 5))) {
 						array_shift($state['pending']);

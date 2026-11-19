@@ -75,6 +75,7 @@ backfillExpect(backfillSnapshot($pdo) === $entryState, 'real backfill leaves rea
 // Verify unread and feed scopes. The previously read Zelda item is excluded.
 $unread = $backfill->create(['scope'=>'unread']);
 $unreadResult = $backfill->run((string)$unread['id'], 50, 20);
+backfillExpect((int)$unreadResult['scanned'] === (int)$pdo->query('SELECT COUNT(*) FROM `_entry` WHERE is_read=0')->fetchColumn(), 'unread scope scans exactly the unread entries');
 $zeldaId = (string)$pdo->query("SELECT id FROM `_entry` WHERE title='Nintendo announces new Zelda game'")->fetchColumn();
 $readZelda = array_values(array_filter($entryState, static fn(array $row): bool => (string)$row['id'] === $zeldaId))[0] ?? null;
 if ($readZelda !== null && (int)$readZelda['is_read'] === 1) {
@@ -83,6 +84,28 @@ if ($readZelda !== null && (int)$readZelda['is_read'] === 1) {
 $feedJob = $backfill->create(['scope'=>'feed', 'feed_id'=>1]);
 $feedResult = $backfill->run((string)$feedJob['id'], 50, 20);
 backfillExpect((int)$feedResult['scanned'] === count($entryState), 'feed scope scans only its selected fixture feed');
+
+// Review R1/R2 reproduction: failed-only scan cursor must not hide a retry
+// below it, and one provider error must not prevent a later failed ID running.
+$stateBeforeFailedScope = ArticleTopicsStore::readState($userPath);
+$failedIds = $pdo->query('SELECT id FROM `_entry` WHERE `date` > '.(time()-86400*7).' ORDER BY id LIMIT 2')->fetchAll(PDO::FETCH_COLUMN);
+$failedState = $stateBeforeFailedScope;
+foreach ($failedIds as $failedId) $failedState['failures'][(string)$failedId]=['attempts'=>5,'next_retry_at'=>PHP_INT_MAX,'last_error'=>'fixture capped worker failure'];
+ArticleTopicsStore::writeState($userPath,$failedState);
+$failedConfig=$config; $failedConfig['mode']='llm';
+$failedEngine=new ArticleTopicsBackfill($userName,$failedConfig);
+$failedJob=$failedEngine->create(['scope'=>'failed']);
+backfillMock('__test__/responses',['responses'=>[500]]);
+$failedFirst=$failedEngine->run($failedJob['id'],1,20);
+backfillExpect((int)$failedFirst['failed']===1 && (int)$failedFirst['llm_calls']===1,'failed-only provider error is durable and counted');
+$failedSecond=$failedEngine->run($failedJob['id'],1,20);
+backfillExpect((int)$failedSecond['scanned']===2 && $failedSecond['status']==='pending','failed-only scan reaches the next ID while earlier retry cools down');
+$jobRecords=json_decode((string)file_get_contents($userPath.'/jobs.json'),true,512,JSON_THROW_ON_ERROR);
+foreach ($jobRecords[$failedJob['id']]['failures'] as &$failedRecord) $failedRecord['next_retry_at']=0; unset($failedRecord);
+file_put_contents($userPath.'/jobs.json',json_encode($jobRecords,JSON_THROW_ON_ERROR));
+$failedRecovered=(new ArticleTopicsBackfill($userName,$failedConfig))->run($failedJob['id'],1,20);
+backfillExpect($failedRecovered['status']==='complete' && $failedRecovered['failures']===[], 'failed-only retry below the scan cursor is recovered after resume');
+ArticleTopicsStore::writeState($userPath,$stateBeforeFailedScope);
 
 // A second runner must not enter while this user's worker lock is held.
 $lock = fopen($userPath . '/worker.lock', 'c');

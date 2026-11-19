@@ -11,6 +11,7 @@ final class ArticleTopicsClassifier {
 		$this->config = $config;
 		$this->llm = new ArticleTopicsLlmClient($config);
 	}
+	public function llmCalls(): int { return $this->llm->requestCount; }
 
 	/** @return array{title:string,body:string,tags:list<string>} */
 	public function inputs(FreshRSS_Entry $entry): array {
@@ -64,8 +65,9 @@ final class ArticleTopicsClassifier {
 			foreach ($names as $name) { $confidence[$name] = 1.0; }
 			return $this->result($names, 'keywords', $confidence, $matched, 0);
 		}
-		$llmCalls++;
+		$beforeCalls = $this->llmCalls();
 		$response = $this->llm->classify($inputs, $taxonomy, $deadline);
+		$llmCalls = $this->llmCalls() - $beforeCalls;
 		$allowed = array_fill_keys(array_column($topics, 'name'), true);
 		$llmByName = [];
 		foreach ($response['categories'] as $candidate) {

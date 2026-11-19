@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 /** OpenAI-compatible chat-completions transport used by ArticleTopicsClassifier. */
 final class ArticleTopicsLlmClient {
+	public int $requestCount = 0;
 
 	public function __construct(private array $config) {}
 
@@ -63,6 +64,7 @@ final class ArticleTopicsLlmClient {
 		$ch = curl_init($url);
 		if ($ch === false) { throw new RuntimeException('Could not initialize LLM transport.'); }
 		curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR), CURLOPT_HTTPHEADER => $headers, CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT_MS => max(1, (int)(min(3.0, $remaining) * 1000)), CURLOPT_TIMEOUT_MS => max(1, (int)($remaining * 1000)), CURLOPT_FOLLOWLOCATION => false, CURLOPT_MAXFILESIZE => 65536]);
+		$this->requestCount++;
 		$body = curl_exec($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 		$ok = is_string($body);

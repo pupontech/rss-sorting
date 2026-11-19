@@ -7,7 +7,7 @@ $files = [];
 foreach ($directories as $directory) {
 	$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS));
 	foreach ($iterator as $file) {
-		if ($file->isFile() && strtolower($file->getExtension()) === 'php') $files[] = $file->getPathname();
+		if ($file->isFile() && in_array(strtolower($file->getExtension()), ['php', 'phtml'], true)) $files[] = $file->getPathname();
 	}
 }
 sort($files, SORT_STRING);

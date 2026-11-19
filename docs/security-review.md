@@ -27,3 +27,7 @@
 ## Conclusion
 
 The reviewed source has direct controls for pair ownership, request redirection, bounded content, server-side taxonomy validation, and owned-label retention. The audit does not establish Milestone 4 completion: protocol/host policy, operational verification, CI/PHPStan, and release packaging are not evidenced here. This snapshot must not be read as a broad security guarantee or as completion of the requested release security gate.
+
+## Final integration evidence
+
+The backfill scope mappings and CLI queue runner are fixed. Authenticated headless Edge checks passed health/preview, topic changes/save, hidden saved key, prefix preservation, backfill enqueue, and invalid CSRF rejection (403). FreshRSS CSP blocks inline scripts; assets now use getFileUrl and Minz_View append hooks. Full SQLite integration demonstrated forced worker interruption/recovery and preserved manual/read/star state. Two-round Luna review approved; see review-ledger.md. This is not evidence for PostgreSQL/MySQL, concurrent external manual edits, Android rendering or real-feed model accuracy.

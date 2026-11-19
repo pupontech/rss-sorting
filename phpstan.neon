@@ -1,0 +1,15 @@
+parameters:
+	level: 5
+	# FreshRSS extension configuration and DAO values can come from persisted
+	# data with a wider runtime shape than FreshRSS's PHPDoc declarations.
+	treatPhpDocTypesAsCertain: false
+	phpVersion:
+		min: 80100
+		max: 80599
+	paths:
+		- xExtension-ArticleTopics
+
+	bootstrapFiles:
+		- phpstan-bootstrap.php
+	scanFiles:
+		- phpstan-freshrss-cli.stub

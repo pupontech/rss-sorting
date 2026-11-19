@@ -1,0 +1,39 @@
+services:
+  freshrss:
+    image: freshrss/freshrss:1.30.4
+    depends_on:
+      mock:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Jerusalem
+      FRESHRSS_INSTALL: >-
+        --default-user=demo --api-enabled --db-type=sqlite
+      FRESHRSS_USER: >-
+        --user=demo --password=demo --api-password=demo-api --no-default-feeds
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - freshrss-data:/var/www/FreshRSS/data
+      - ./xExtension-ArticleTopics:/var/www/FreshRSS/extensions/xExtension-ArticleTopics:ro
+      - ./tests:/tests:ro
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1/i/') === false ? 1 : 0);"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  mock:
+    build:
+      context: ./tests/mock
+    environment:
+      PORT: "8081"
+    ports:
+      - "127.0.0.1:8081:8081"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health')"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+volumes:
+  freshrss-data:

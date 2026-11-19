@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: FreshRSS/FreshRSS
+          ref: 1.30.4
+          path: .upstream/FreshRSS
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: curl, mbstring, pdo_sqlite, zip
+          coverage: none
+      - uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer check
+      - run: php scripts/build-release.php --check
+
+  freshrss-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Start FreshRSS 1.30.4 and deterministic mock
+        run: docker compose -f docker-compose.test.yml up -d --build --wait
+      - name: Seed SQLite fixture
+        run: |
+          docker compose -f docker-compose.test.yml cp tests/docker/seed.php freshrss:/tmp/seed-article-topics.php
+          docker compose -f docker-compose.test.yml exec -T freshrss php /tmp/seed-article-topics.php > seed.json
+          echo "FEED_ID=$(php -r '$s=json_decode(file_get_contents("seed.json"), true); echo $s["feed_id"] ?? "";')" >> "$GITHUB_ENV"
+      - name: Refresh fixture and classify articles
+        run: |
+          docker compose -f docker-compose.test.yml exec -T freshrss php cli/actualize-user.php --user=demo --feed-id="$FEED_ID"
+          docker compose -f docker-compose.test.yml exec -T freshrss php extensions/xExtension-ArticleTopics/cli/classify.php --user=demo --limit=50
+      - name: Verify Google Reader API behavior
+        run: >-
+          docker compose -f docker-compose.test.yml exec -T
+          -e FRESHRSS_API_BASE=http://127.0.0.1/api/greader.php
+          -e FRESHRSS_USER=demo -e FRESHRSS_PASSWORD=demo-api
+          -e FRESHRSS_ORIGINAL_FEED_ID="$FEED_ID"
+          -e FRESHRSS_ORIGINAL_FEED_TITLE="General Tech Daily"
+          freshrss php /tests/api/verify_greader.php
+      - name: Tear down test stack
+        if: always()
+        run: docker compose -f docker-compose.test.yml down --volumes --remove-orphans

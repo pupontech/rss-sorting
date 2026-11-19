@@ -1,0 +1,7 @@
+.upstream/
+.tools/
+*.log
+/vendor/
+/dist/*.zip
+/.phpunit.cache/
+/.phpstan-cache/

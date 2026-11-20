@@ -1,0 +1,213 @@
+{
+  "topics": [
+    {
+      "name": "AI",
+      "enabled": true,
+      "description": "AI model capabilities, assistants, training, evaluation, and AI products. A coding tutorial that simply uses an AI tool belongs in Software & Web.",
+      "positive_keywords": {
+        "artificial intelligence": 1,
+        "machine learning": 1,
+        "large language model": 1,
+        "language models": 1,
+        "model benchmarks": 1,
+        "ai assistant": 1,
+        "ai coding assistant": 1,
+        "model inference": 1,
+        "fine-tuning": 1
+      },
+      "negative_keywords": [],
+      "threshold": 2,
+      "exclusions": []
+    },
+    {
+      "name": "Software & Web",
+      "enabled": true,
+      "description": "Programming, software engineering, developer tools, web design, accessibility, and web standards. Systems administration belongs in Self-Hosting & Systems.",
+      "positive_keywords": {
+        "software development": 1,
+        "web development": 1,
+        "developer tools": 1,
+        "web standards": 1,
+        "web accessibility": 1,
+        "javascript": 1,
+        "stylesheet": 1,
+        "typescript": 1,
+        "programming language": 1,
+        "unit tests": 1,
+        "application framework": 1
+      },
+      "negative_keywords": [],
+      "threshold": 2,
+      "exclusions": []
+    },
+    {
+      "name": "Security & Privacy",
+      "enabled": true,
+      "description": "Vulnerabilities, threats, defensive engineering, and privacy. A Linux story focused on a vulnerability belongs here even when it discusses systems administration.",
+      "positive_keywords": {
+        "cybersecurity": 1,
+        "security patch": 1,
+        "security vulnerability": 1,
+        "data breach": 1,
+        "threat actor": 1,
+        "phishing": 1,
+        "exploit mitigation": 1,
+        "end-to-end encryption": 1,
+        "privacy policy": 1,
+        "ransomware": 1,
+        "access control": 1
+      },
+      "negative_keywords": [],
+      "threshold": 2,
+      "exclusions": []
+    },
+    {
+      "name": "Self-Hosting & Systems",
+      "enabled": true,
+      "description": "Running services, infrastructure, storage and operating systems. A guide to running a Linux server belongs here when security is a supporting topic.",
+      "positive_keywords": {
+        "self-hosting": 1,
+        "self-hosted": 1,
+        "homelab": 1,
+        "home server": 1,
+        "docker compose": 1,
+        "network attached storage": 1,
+        "system administration": 1,
+        "linux distribution": 1,
+        "virtual machine": 1,
+        "operating system": 1,
+        "backup restore": 1
+      },
+      "negative_keywords": [],
+      "threshold": 2,
+      "exclusions": []
+    },
+    {
+      "name": "Hardware & Devices",
+      "enabled": true,
+      "description": "Computers, chips, phones, wearables, accessories, component reviews, and device defects. Cameras primarily discussed as creative tools belong in Photography & Visual Arts.",
+      "positive_keywords": {
+        "computer hardware": 1,
+        "graphics card": 1,
+        "solid-state drive": 1,
+        "device review": 1,
+        "processor benchmarks": 1,
+        "battery life": 1,
+        "wearable device": 1,
+        "hardware design": 1,
+        "laptop review": 1,
+        "system on chip": 1
+      },
+      "negative_keywords": [],
+      "threshold": 2,
+      "exclusions": []
+    },
+    {
+      "name": "Internet & Tech Business",
+      "enabled": true,
+      "description": "Technology companies and their strategy, platforms, the indie web, online communities and publishing services. Use Software & Web for how a site is built.",
+      "positive_keywords": {
+        "technology industry": 1,
+        "tech company": 1,
+        "indie web": 1,
+        "indieweb": 1,
+        "independent publishing": 1,
+        "social network": 1,
+        "online community": 1,
+        "rss reader": 1,
+        "technology business": 1,
+        "platform policy": 1,
+        "revenue growth": 1
+      },
+      "negative_keywords": [],
+      "threshold": 2,
+      "exclusions": []
+    },
+    {
+      "name": "Gaming",
+      "enabled": true,
+      "description": "Games, gameplay, game development, emulation and consoles as gameplay platforms. A manufacturing defect on a console belongs in Hardware & Devices.",
+      "positive_keywords": {
+        "video game": 1,
+        "video games": 1,
+        "game developer": 1,
+        "game design": 1,
+        "gameplay": 1,
+        "indie game": 1,
+        "gaming console": 1,
+        "retro gaming": 1,
+        "game emulator": 1,
+        "game release": 1
+      },
+      "negative_keywords": [],
+      "threshold": 2,
+      "exclusions": []
+    },
+    {
+      "name": "Photography & Visual Arts",
+      "enabled": true,
+      "description": "Photography, editing, cameras used as creative tools, illustration, and visual arts. Audio, movies, and general pop culture belong in Books, Film & Music.",
+      "positive_keywords": {
+        "photography": 1,
+        "photographer": 1,
+        "camera lens": 1,
+        "film photography": 1,
+        "digital photographs": 1,
+        "photo editing": 1,
+        "image editing": 1,
+        "visual arts": 1,
+        "art exhibition": 1,
+        "fine art print": 1,
+        "darkroom": 1
+      },
+      "negative_keywords": [],
+      "threshold": 2,
+      "exclusions": []
+    },
+    {
+      "name": "Books, Film & Music",
+      "enabled": true,
+      "description": "Literature, book criticism, cinema, television, recorded music, and performing arts. A programming book discussed primarily for its technical teachings belongs in Software & Web.",
+      "positive_keywords": {
+        "book review": 1,
+        "literary fiction": 1,
+        "book publishing": 1,
+        "film review": 1,
+        "movie review": 1,
+        "film director": 1,
+        "television series": 1,
+        "music album": 1,
+        "performing arts": 1,
+        "concert review": 1,
+        "record label": 1
+      },
+      "negative_keywords": [],
+      "threshold": 2,
+      "exclusions": []
+    },
+    {
+      "name": "Life & Society",
+      "enabled": true,
+      "description": "Everyday life, personal essays, wellbeing, travel, public affairs, social issues, and ideas. Use a more specific topic when a specialized subject drives the article.",
+      "positive_keywords": {
+        "personal essay": 1,
+        "weeknotes": 1,
+        "everyday life": 1,
+        "mental health": 1,
+        "public policy": 1,
+        "civil society": 1,
+        "travel diary": 1,
+        "public affairs": 1,
+        "local government": 1,
+        "outdoor recreation": 1,
+        "religious community": 1
+      },
+      "negative_keywords": [],
+      "threshold": 2,
+      "exclusions": []
+    }
+  ],
+  "feeds": {},
+  "focused_feeds": [],
+  "fallback": "Uncategorized"
+}

@@ -62,6 +62,21 @@ try {
 	$ranked=(new ArticleTopicsClassifier(['mode'=>'llm','max_topics'=>1,'api_url'=>'http://127.0.0.1:'.$port]))->classify(['title'=>'x','body'=>'','tags'=>[]],$taxonomy,microtime(true)+5);
 	assertSameValue(['Finance'],$ranked['names'],'LLM top-N follows confidence rather than taxonomy order');
 
+	$taxonomy[0]['positive_keywords'] = ['zelda' => 3];
+	$taxonomy[1]['positive_keywords'] = ['finance' => 3];
+	$primary = new ArticleTopicsClassifier(['mode'=>'hybrid', 'max_topics'=>1, 'api_url'=>'http://127.0.0.1:'.$port]);
+	$clear = $primary->classify(['title'=>'Zelda release', 'body'=>'', 'tags'=>[]], $taxonomy, microtime(true)+5);
+	assertSameValue(['Video Games'], $clear['names'], 'clear one-topic match remains local');
+	assertSameValue(0, $clear['llm_calls']);
+	$overlap = $primary->classify(['title'=>'Zelda and finance', 'body'=>'', 'tags'=>[]], $taxonomy, microtime(true)+5);
+	assertSameValue(['Finance'], $overlap['names'], 'provider settles the overlap without a second label');
+	assertSameValue(1, $overlap['llm_calls']);
+	file_put_contents($statePath, json_encode(['content'=>'{"categories":[]}']));
+	$fallback = $primary->classify(['title'=>'Zelda and finance', 'body'=>'', 'tags'=>[]], $taxonomy, microtime(true)+5);
+	assertSameValue(['Uncategorized'], $fallback['names'], 'provider can decide that neither keyword topic fits');
+	assertSameValue('quota', ArticleTopicsLlmClient::httpError(429, '{"error":{"code":"credit_balance_exhausted"}}')->reason);
+	assertSameValue('temporary', ArticleTopicsLlmClient::httpError(429, '{"error":{"code":"rate_limit_exceeded"}}')->reason);
+
 	file_put_contents($statePath, json_encode(['content' => 'not valid JSON']));
 	assertThrows(static fn() => $classify(new FreshRSS_Entry('A title', 'Ordinary article body'), $taxonomy), RuntimeException::class, 'malformed model JSON must fail');
 

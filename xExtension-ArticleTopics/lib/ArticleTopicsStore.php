@@ -65,8 +65,50 @@ final class ArticleTopicsStore {
 	public static function enableAtHighWater(string $dir): void {
 		self::ensureDir($dir); $lock = fopen($dir . '/worker.lock', 'c');
 		if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) throw new RuntimeException('Worker is active; retry enabling classification after it finishes.');
-		try { $existing=[]; $offset=0; do { $ids=FreshRSS_Factory::createEntryDao()->listIdsWhere('a', state: FreshRSS_Entry::STATE_ALL, order:'ASC', limit:1000, offset:$offset) ?? []; foreach ($ids as $id) $existing[]=(int)$id; $offset+=count($ids); } while (count($ids)===1000); self::writeState($dir, self::newState($existing === [] ? 0 : max($existing), $existing)); }
+		try { self::writeState($dir, self::stateForNewArrivals()); }
 		finally { flock($lock, LOCK_UN); fclose($lock); }
+	}
+
+	/** Capture the initial article set while the caller holds the worker lock. */
+	public static function stateForNewArrivals(): array {
+		$existing = [];
+		$minimum = '0';
+		while (true) {
+			$ids = FreshRSS_Factory::createEntryDao()->listIdsWhere('a', state: FreshRSS_Entry::STATE_ALL,
+				id_min: $minimum, order: 'ASC', limit: 1000) ?? [];
+			foreach ($ids as $id) { $existing[] = (int)$id; }
+			if (count($ids) < 1000) { break; }
+			$minimum = (string)((int)end($ids) + 1);
+		}
+		// Keep scanning low IDs so a delayed feed commit can still be discovered.
+		return self::newState($existing === [] ? 0 : max($existing), $existing);
+	}
+
+	public static function retryLiveFailures(string $dir): int {
+		self::ensureDir($dir);
+		$lock = fopen($dir . '/worker.lock', 'c');
+		if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
+			throw new RuntimeException('Worker is active. Try again when it finishes.');
+		}
+		try {
+			$state = self::readState($dir);
+			$retryIds = [];
+			foreach ($state['failures'] as $id => &$failure) {
+				$retryIds[] = (int)$id;
+				$failure['attempts'] = 0;
+				$failure['next_retry_at'] = 0;
+				$failure['exhausted'] = false;
+			}
+			unset($failure);
+			$state['pending'] = array_values(array_unique(array_merge($state['pending'], $retryIds)));
+			$state['processed_ids'] = array_values(array_diff($state['processed_ids'], $retryIds));
+			self::writeState($dir, $state);
+			if ($retryIds !== [] && function_exists('invalidateHttpCache')) { invalidateHttpCache(); }
+			return count($retryIds);
+		} finally {
+			flock($lock, LOCK_UN);
+			fclose($lock);
+		}
 	}
 
 	public static function discoverCommitted(string $dir): void {
@@ -74,7 +116,13 @@ final class ArticleTopicsStore {
 		foreach ($state['pending'] as $id) { $id=(string)$id; $failure=$state['failures'][$id] ?? null; if (!isset($processed[$id]) && (!is_array($failure) || (int)($failure['next_retry_at'] ?? 0) <= $now)) $pending[$id]=true; }
 		$offset=max(0,(int)($state['discovery_offset'] ?? 0)); $pages=0;
 		do { $ids=FreshRSS_Factory::createEntryDao()->listIdsWhere('a', state:FreshRSS_Entry::STATE_ALL, id_min:(string)max(1,(int)$state['start_id']+1), order:'ASC', limit:1000, offset:$offset) ?? []; foreach ($ids as $id) { $id=(string)$id; if (isset($processed[$id])) continue; $failure=$state['failures'][$id] ?? null; if (is_array($failure) && (int)($failure['next_retry_at'] ?? 0) > $now) continue; $pending[$id]=true; } $offset+=count($ids); $pages++; } while (count($ids)===1000 && $pages<2);
-		$state['discovery_offset']=count($ids)<1000 ? 0 : $offset; $state['pending']=array_map('intval',array_keys($pending)); sort($state['pending'],SORT_NUMERIC); self::writeState($dir,$state);
+		$state['discovery_offset'] = count($ids) < 1000 ? 0 : $offset;
+		$state['pending'] = array_map('intval', array_keys($pending));
+		sort($state['pending'], SORT_NUMERIC);
+		if (isset($state['trial_started_at'])) {
+			$state['trial_articles'] = array_slice(array_values(array_unique(array_merge($state['trial_articles'] ?? [], $state['pending']))), 0, 50);
+		}
+		self::writeState($dir, $state);
 	}
 
 	private static function newState(int $cursor=0,array $processed=[]): array { return ['schema'=>self::SCHEMA,'start_id'=>0,'cursor_id'=>$cursor,'pending'=>[],'processed_ids'=>array_values(array_unique(array_map('intval',$processed))),'discovery_offset'=>0,'failures'=>[],'fingerprints'=>[],'cache'=>[]]; }

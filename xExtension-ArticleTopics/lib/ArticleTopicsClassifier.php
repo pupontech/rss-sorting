@@ -27,9 +27,14 @@ final class ArticleTopicsClassifier {
 		$names = array_column($this->normalizeTaxonomy($this->profile['topics'] ?? $taxonomy), 'name');
 		if ($this->profile !== null) {
 			$names[] = $this->profile['fallback'];
+		} elseif ($this->singleTopic()) {
+			$names[] = $this->fallbackName();
 		}
-		return $names;
+		return array_values(array_unique($names));
 	}
+
+	private function singleTopic(): bool { return (int)($this->config['max_topics'] ?? 2) === 1; }
+	private function fallbackName(): string { return $this->profile['fallback'] ?? 'Uncategorized'; }
 
 	/** @return array{topics:list<array{name:string,enabled:bool,description:string,positive_keywords:array<string,int|float>,negative_keywords:list<string>,threshold:int|float,exclusions:list<string>}>,feeds:array<int,string>,focused_feeds:list<int>,fallback:string}|null */
 	public static function loadProfile(): ?array {
@@ -141,15 +146,16 @@ final class ArticleTopicsClassifier {
 			if (!$negative && $headlineScore >= $topic['threshold']) { $headlineNames[] = $topic['name']; }
 		}
 		$keywordConflict = $this->hasConflict(array_keys($keywordNames), $topics);
-		$needsLlm = $mode === 'llm' || ($mode === 'hybrid' && (count($keywordNames) === 0 || $keywordConflict || $weak));
+		$ambiguous = $this->singleTopic() && count($keywordNames) > 1;
+		$needsLlm = $mode === 'llm' || ($mode === 'hybrid' && (count($keywordNames) === 0 || $keywordConflict || $weak || $ambiguous));
 		$llmCalls = 0; $confidence = [];
 		if ($mode !== 'llm' && !$needsLlm) {
 			$names = $this->profile === null
 				? $this->resolveNames(array_keys($keywordNames), $topics, $scores)
 				: $this->profileKeywordNames($feedId, array_keys($keywordNames), $headlineNames, $topics, $scores);
 			foreach ($names as $name) { $confidence[$name] = 1.0; }
-			if ($names === [] && $this->profile !== null) {
-				$names = [$this->profile['feeds'][$feedId] ?? $this->profile['fallback']];
+			if ($names === [] && ($this->profile !== null || $this->singleTopic())) {
+				$names = [$this->profile['feeds'][$feedId] ?? $this->fallbackName()];
 				$confidence[$names[0]] = 0.5;
 			}
 			return $this->result($names, 'keywords', $confidence, $matched, 0);
@@ -161,21 +167,24 @@ final class ArticleTopicsClassifier {
 		$llmByName = [];
 		foreach ($response['categories'] as $candidate) {
 			$name = $candidate['name'];
-			if (!isset($allowed[$name])) { continue; }
+			if (!isset($allowed[$name])) {
+				if ($this->singleTopic()) { throw new ArticleTopicsProviderError('response', 'The AI provider selected a topic outside the configured list.'); }
+				continue;
+			}
 			if ((float)$candidate['confidence'] < (float)($this->config['confidence_threshold'] ?? 0)) { continue; }
 			$llmByName[$name] = max((float)($llmByName[$name] ?? 0.0), (float)$candidate['confidence']);
 		}
 		$candidates = [];
-		if ($mode === 'llm') { $candidates = array_keys($llmByName); }
+		if ($mode === 'llm' || $this->singleTopic()) { $candidates = array_keys($llmByName); }
 		else { $candidates = array_values(array_unique(array_merge(array_keys($keywordNames), array_keys($llmByName)))); }
 		foreach ($llmByName as $name => $value) { $confidence[$name] = $value; }
-		foreach ($llmByName as $name => $value) { if ($mode === 'llm' || !isset($keywordNames[$name])) { $scores[$name] = $value; } }
+		foreach ($llmByName as $name => $value) { if ($mode === 'llm' || $this->singleTopic() || !isset($keywordNames[$name])) { $scores[$name] = $value; } }
 		$names = $this->resolveNames($candidates, $topics, $scores);
 		if ($names === [] && $this->profile === null && is_string($this->config['fallback_topic'] ?? null) && $this->config['fallback_topic'] !== '') {
 			foreach ($topics as $topic) { if ($topic['name'] === $this->config['fallback_topic']) { $names = [$topic['name']]; break; } }
 		}
-		if ($names === [] && $this->profile !== null) {
-			$names = [$this->profile['feeds'][$feedId] ?? $this->profile['fallback']];
+		if ($names === [] && ($this->profile !== null || $this->singleTopic())) {
+			$names = [$this->singleTopic() ? $this->fallbackName() : ($this->profile['feeds'][$feedId] ?? $this->fallbackName())];
 		}
 		foreach ($names as $name) { $confidence[$name] ??= 0.5; }
 		return $this->result($names, $mode === 'llm' ? 'llm' : 'hybrid', $confidence, $matched, $llmCalls);

@@ -73,7 +73,7 @@ final class ArticleTopicsRetention extends FreshRSS_TagDAO {
 			foreach ($pairs as $pair) {
 				if (microtime(true) >= $deadline) { break; }
 				$params = [':entry' => $pair['id_entry'], ':tag' => $pair['id_tag']];
-				if (!$deletePair->execute($params) || !$deleteOwned->execute($params)) {
+				if (!$deleteOwned->execute($params) || !$deletePair->execute($params)) {
 					throw new RuntimeException('Could not expire owned label.');
 				}
 				$count++;

@@ -22,3 +22,20 @@ assertSameValue(['Video Games'], $preview['names'], 'preview classifies supplied
 assertSameValue('keywords', $preview['method'], 'preview reports classification method');
 assertSameValue(['zelda'], $preview['matched']['Video Games'], 'preview reports matched keyword');
 assertSameValue(0, $preview['llm_calls'], 'keyword preview makes no provider call');
+
+$dir = USERS_PATH . '/notices/extensions/ArticleTopics';
+ArticleTopicsStore::writeState($dir, ['pending'=>[4], 'processed_ids'=>[3], 'failures'=>[
+	'1'=>['reason'=>'quota','first_at'=>200,'attempts'=>1,'next_retry_at'=>999,'exhausted'=>false],
+	'2'=>['reason'=>'quota','first_at'=>100,'attempts'=>2,'next_retry_at'=>999,'exhausted'=>false],
+	'3'=>['reason'=>'temporary','first_at'=>300,'attempts'=>2,'next_retry_at'=>999,'exhausted'=>false],
+	'4'=>['reason'=>'temporary','first_at'=>250,'attempts'=>5,'next_retry_at'=>PHP_INT_MAX,'exhausted'=>true],
+]]);
+$notices = ArticleTopicsAdmin::failureNotices($dir);
+assertSameValue(2, $notices['quota']['count'], 'quota notice is immediate and groups affected articles');
+assertSameValue(100, $notices['quota']['first_at'], 'notice uses the earliest failure');
+assertSameValue(1, $notices['temporary']['count'], 'transient failure is visible only after retries');
+assertSameValue(4, ArticleTopicsStore::retryLiveFailures($dir));
+$retry = ArticleTopicsStore::readState($dir);
+assertSameValue([4,1,2,3], $retry['pending']);
+assertSameValue([], $retry['processed_ids']);
+assertSameValue(0, $retry['failures'][4]['next_retry_at']);

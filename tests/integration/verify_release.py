@@ -44,10 +44,10 @@ def server(command, url, log_path, env):
             process.wait(timeout=10)
 
 
-def run_php(php, args, cwd, env, exit_code=0):
+def run_php(php, args, cwd, env, exit_code=0, stdin=None):
     result = subprocess.run(
         [php, *map(str, args)], cwd=cwd, env=env, text=True, encoding="utf-8",
-        errors="replace", capture_output=True, timeout=40,
+        errors="replace", capture_output=True, timeout=40, input=stdin,
     )
     assert result.returncode == exit_code, result.stdout + result.stderr
     return result
@@ -276,6 +276,67 @@ def profile_upgrade(page, base, root, extension, php, env, release):
           "exclusive fallback, cached results, and preservation of read and manual labels")
 
 
+def verify_new_arrivals_trial(page, base, root, extension, php, env, mock):
+    owner = root / "data/users/stagingowner"
+    state_path = owner / "extensions/ArticleTopics/state.json"
+    settings = base + "?c=extension&a=configure&e=ArticleTopics"
+    with closing(sqlite3.connect(owner / "db.sqlite")) as db:
+        entry, tag = db.execute(
+            "SELECT o.id_entry,o.id_tag FROM at_owned o JOIN entry e ON e.id=o.id_entry WHERE e.is_read=0 LIMIT 1"
+        ).fetchone()
+        state = json.loads(state_path.read_text())
+        state["failures"] = {str(entry): {
+            "reason": "quota", "attempts": 1, "next_retry_at": int(time.time()) + 600,
+            "first_at": int(time.time()), "last_error": "Fixture quota refusal", "exhausted": False,
+        }}
+        state_path.write_text(json.dumps(state))
+        page.goto(base + "?get=a")
+        notice = page.locator("#nav_menu_hooks")
+        expect(notice.get_by_text("Affected articles: 1.", exact=False)).to_be_visible()
+        notice.get_by_role("link", name="Settings and retry").click()
+        expect(page).to_have_url(settings + "#article-topics-retry")
+        csrf = page.locator("#article-topics-form input[name=_csrf]").input_value()
+        result = page.request.post(base + "?c=tag&a=tagEntry&ajax=1", data={
+            "_csrf": csrf, "id_tag": tag, "id_entry": str(entry), "checked": False, "ajax": 1,
+        })
+        assert result.ok, result.text()
+        assert db.execute("SELECT 1 FROM at_override WHERE id_entry=?", (entry,)).fetchone()
+        page.get_by_role("button", name="Retry failed classifications").click()
+        expect(page.get_by_text("Queued 1 article(s) for the next classifier run.")).to_be_visible()
+        run_php(php, [extension / "cli/classify.php", "--user=stagingowner"], root, env)
+        assert not db.execute("SELECT 1 FROM entrytag WHERE id_entry=? AND id_tag=?", (entry, tag)).fetchone()
+        page.goto(base + "?get=a&fixture=resolved")
+        expect(page.locator("#nav_menu_hooks")).to_have_count(0)
+
+        baseline = db.execute("SELECT id_entry,id_tag FROM entrytag ORDER BY id_entry,id_tag").fetchall()
+        start = extension / "cli/start-trial.php"
+        started = run_php(php, [start, "--user=stagingowner", "--api-url=" + mock, "--model=fixture"],
+                          root, env, stdin="fixture-token\n")
+        assert "Protected 12 existing articles" in started.stdout
+        state = json.loads(state_path.read_text())
+        assert state["fingerprints"] == [] and state["pending"] == [] and len(state["processed_ids"]) == 12
+        page.goto(settings)
+        expect(page.locator("#mode")).to_have_value("hybrid")
+        expect(page.locator('[name="max_topics"]')).to_have_value("1")
+        expect(page.get_by_text("New-arrivals trial started", exact=False)).to_be_visible()
+
+        # Delayed feed commits can carry an ID lower than the activation high-water mark.
+        delayed = min(state["processed_ids"]) - 1
+        db.execute("""INSERT INTO entry(id,guid,title,link,is_read,is_favorite,id_feed,date,content)
+                    VALUES(?,?,?,?,0,0,1,?,?)""",
+                   (delayed, "delayed-trial", "Home server and homelab", "https://example.invalid/trial",
+                    int(time.time()), "Running services on a spare machine."))
+        db.commit()
+        classified = run_php(php, [extension / "cli/classify.php", "--user=stagingowner"], root, env)
+        assert "processed 1 article(s)" in classified.stdout
+        assert db.execute("SELECT id_entry,id_tag FROM entrytag WHERE id_entry<>? ORDER BY id_entry,id_tag",
+                          (delayed,)).fetchall() == baseline
+        assert db.execute("""SELECT t.name FROM entrytag e JOIN tag t ON t.id=e.id_tag WHERE e.id_entry=?""",
+                          (delayed,)).fetchall() == [("Topic: Self-Hosting & Systems",)]
+        assert json.loads(state_path.read_text())["trial_articles"] == [delayed]
+    print("PASS reading notice, native tag removal, retry, and Hybrid trial scoped to new arrivals")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--freshrss", type=Path, required=True)
@@ -340,6 +401,7 @@ def main():
             print("PASS unlisted account cannot open the settings or run either CLI worker")
             if args.previous:
                 profile_upgrade(owner_page, base, root, extension, php, env, args.release)
+                verify_new_arrivals_trial(owner_page, base, root, extension, php, env, mock.rstrip("/"))
 
 
 if __name__ == "__main__":

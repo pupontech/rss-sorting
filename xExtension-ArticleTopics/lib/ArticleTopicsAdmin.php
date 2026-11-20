@@ -2,9 +2,37 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ArticleTopicsClassifier.php';
+require_once __DIR__ . '/ArticleTopicsLlmClient.php';
 
 /** Bounded, read-only preview and explicitly requested provider/backfill admin actions. */
 final class ArticleTopicsAdmin {
+	/** @return array<string,array{message:string,count:int,first_at:int}> */
+	public static function failureNotices(string $extensionUserPath): array {
+		$statePath = rtrim($extensionUserPath, '/\\') . '/state.json';
+		$raw = is_file($statePath) ? file_get_contents($statePath) : false;
+		$failures = $raw === false ? [] : (json_decode($raw, true)['failures'] ?? []);
+		if (!is_array($failures)) { return []; }
+		$notices = [];
+		foreach ($failures as $failure) {
+			$reason = $failure['reason'] ?? '';
+			if (!in_array($reason, ['authentication', 'quota'], true) && empty($failure['exhausted'])) { continue; }
+			$message = match ($reason) {
+				'authentication' => 'The AI provider rejected access. Check the provider URL and API key.',
+				'quota' => 'The AI provider reported exhausted credits or a usage limit.',
+				'temporary' => 'The AI provider could not be reached after retries.',
+				'response' => 'The AI provider returned an error after retries.',
+				default => 'Article classification failed after retries.',
+			};
+			$group = in_array($reason, ['authentication', 'quota', 'temporary', 'response'], true) ? $reason : 'classification';
+			$first = (int)($failure['first_at'] ?? 0);
+			$notice = $notices[$group] ?? ['message' => $message, 'count' => 0, 'first_at' => $first];
+			$notice['count']++;
+			$notice['first_at'] = min($notice['first_at'], $first);
+			$notices[$group] = $notice;
+		}
+		return $notices;
+	}
+
 	public static function diagnostics(string $extensionUserPath): array {
 		$statePath = rtrim($extensionUserPath, '/\\') . '/state.json';
 		$state = is_file($statePath) ? json_decode((string)file_get_contents($statePath), true) : [];
@@ -20,14 +48,17 @@ final class ArticleTopicsAdmin {
 			if (!is_array($failure)) { continue; }
 			$recent[] = ['entry_id'=>(string)$id,'attempts'=>(int)($failure['attempts'] ?? 0),'last_error'=>mb_substr((string)($failure['last_error'] ?? ''),0,300)];
 		}
-		return ['counts'=>['pending'=>count($state['pending'] ?? []),'processed'=>count($state['processed_ids'] ?? []),'failed'=>count($failures)],'methods'=>$methods,'llm_share'=>$totalMethods === 0 ? 0.0 : round(($methods['hybrid'] + $methods['llm']) * 100 / $totalMethods, 1),'recent_failures'=>$recent];
+		return ['counts'=>['pending'=>count($state['pending'] ?? []),'processed'=>count($state['processed_ids'] ?? []),'failed'=>count($failures)],'methods'=>$methods,'llm_share'=>$totalMethods === 0 ? 0.0 : round(($methods['hybrid'] + $methods['llm']) * 100 / $totalMethods, 1),'recent_failures'=>$recent,
+			'trial_started_at' => (int)($state['trial_started_at'] ?? 0), 'trial_articles' => count($state['trial_articles'] ?? [])];
 	}
 
 	public static function healthCheck(array $config): string {
 		$url = self::endpoint((string)($config['api_url'] ?? ''));
-		$payload = ['model'=>(string)($config['model'] ?? ''), 'messages'=>[['role'=>'user','content'=>'Reply with OK.']], 'max_tokens'=>4];
+		$payload = ['model'=>(string)($config['model'] ?? ''), 'messages'=>[['role'=>'user','content'=>'Reply with OK.']]];
+		$payload[parse_url($url, PHP_URL_HOST) === 'api.openai.com' ? 'max_completion_tokens' : 'max_tokens'] = 64;
+		if (!empty($config['reasoning_effort'])) { $payload['reasoning_effort'] = $config['reasoning_effort']; }
 		$response = self::http($url, $payload, $config, 3.0);
-		if ($response['status'] < 200 || $response['status'] >= 300) { throw new RuntimeException('Provider health check failed (HTTP ' . $response['status'] . ').'); }
+		if ($response['status'] < 200 || $response['status'] >= 300) { throw ArticleTopicsLlmClient::httpError($response['status'], $response['body']); }
 		return 'Provider responded successfully.';
 	}
 

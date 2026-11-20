@@ -26,6 +26,28 @@ final class ArticleTopicsAtomicTagDAO extends FreshRSS_TagDAO {
 		} elseif ((int)$current !== 1) {
 			throw new RuntimeException('Unsupported ArticleTopics ownership schema version: ' . (int)$current);
 		}
+		if ($this->pdo->exec('CREATE TABLE IF NOT EXISTS `_at_override` (id_entry BIGINT NOT NULL PRIMARY KEY, FOREIGN KEY (id_entry) REFERENCES `_entry`(id) ON DELETE CASCADE)' . $engine) === false) {
+			throw new RuntimeException('Could not create ArticleTopics manual overrides table.');
+		}
+		if ($type === 'sqlite' && $this->pdo->exec(<<<'SQL'
+			CREATE TRIGGER IF NOT EXISTS `_at_manual_untag` AFTER DELETE ON `_entrytag`
+			WHEN EXISTS (SELECT 1 FROM `_entry` WHERE id = OLD.id_entry)
+			  AND EXISTS (SELECT 1 FROM `_at_owned` WHERE id_entry = OLD.id_entry AND id_tag = OLD.id_tag)
+			BEGIN
+				INSERT OR IGNORE INTO `_at_override` (id_entry) VALUES (OLD.id_entry);
+				DELETE FROM `_at_owned` WHERE id_entry = OLD.id_entry AND id_tag = OLD.id_tag;
+			END
+			SQL) === false) {
+			throw new RuntimeException('Could not create ArticleTopics manual removal trigger.');
+		}
+	}
+	public function hasManualOverride(string $entryId): bool {
+		$record = $this->pdo->prepare('SELECT 1 FROM `_at_override` WHERE id_entry = ?');
+		$missing = $this->pdo->prepare('SELECT 1 FROM `_at_owned` o LEFT JOIN `_entrytag` t ON t.id_entry = o.id_entry AND t.id_tag = o.id_tag WHERE o.id_entry = ? AND t.id_tag IS NULL');
+		if ($record === false || $missing === false || !$record->execute([$entryId]) || !$missing->execute([$entryId])) {
+			throw new RuntimeException('Could not check ArticleTopics manual override.');
+		}
+		return $record->fetchColumn() !== false || $missing->fetchColumn() !== false;
 	}
 	public function pairExists(int $tagId, string $entryId): bool {
 		$stm = $this->pdo->prepare('SELECT 1 FROM `_entrytag` WHERE id_entry = :entry AND id_tag = :tag');
@@ -38,9 +60,9 @@ final class ArticleTopicsAtomicTagDAO extends FreshRSS_TagDAO {
 		return $stm !== false && $stm->execute([':entry' => $entryId, ':tag' => $tagId]);
 	}
 	public function removePairAndOwnership(int $tagId, string $entryId): bool {
-		$stm = $this->pdo->prepare('DELETE FROM `_entrytag` WHERE id_entry = :entry AND id_tag = :tag');
-		if ($stm === false || !$stm->execute([':entry' => $entryId, ':tag' => $tagId])) { return false; }
 		$stm = $this->pdo->prepare('DELETE FROM `_at_owned` WHERE id_entry = :entry AND id_tag = :tag');
+		if ($stm === false || !$stm->execute([':entry' => $entryId, ':tag' => $tagId])) { return false; }
+		$stm = $this->pdo->prepare('DELETE FROM `_entrytag` WHERE id_entry = :entry AND id_tag = :tag');
 		return $stm !== false && $stm->execute([':entry' => $entryId, ':tag' => $tagId]);
 	}
 	public function owned(int $tagId, string $entryId): bool {
@@ -74,15 +96,15 @@ final class ArticleTopicsWorker {
 			return 0;
 		}
 		try {
-			if (!($this->config['enabled'] ?? false)) { throw new RuntimeException('ArticleTopics is disabled for this user.'); }
-			if (($this->config['mode'] ?? 'hybrid') !== 'keywords' && ($this->config['api_url'] ?? '') === '') { throw new RuntimeException('Provider URL is not configured.'); }
+			if (!($this->config['enabled'] ?? false)) { return 0; }
 			$taxonomy = ArticleTopicsStore::validateTaxonomy((string)($this->config['taxonomy_json'] ?? ''));
 			$taxonomy = array_values(array_filter($taxonomy, static fn(array $t): bool => $t['enabled']));
 			$prefix = (string)($this->config['label_prefix'] ?? 'Topic: ');
 			ArticleTopicsStore::assertNoCategoryCollisions($prefix, $taxonomy);
 			$tagDao = new ArticleTopicsAtomicTagDAO();
 			$tagDao->ensureOwnershipSchema();
-			if (class_exists('ArticleTopicsRetention')) {
+			$protectExisting = $this->config['protect_existing_labels'] ?? false;
+			if (!$protectExisting) {
 				try {
 					(new ArticleTopicsRetention())->expireOwned($this->config, $this->deadline, max(1, (int)($this->config['retention_limit'] ?? 500)));
 				} catch (Throwable $retentionError) {
@@ -124,19 +146,20 @@ final class ArticleTopicsWorker {
 				$entry = FreshRSS_Factory::createEntryDao()->searchById((string)$id);
 				$preserveRead = $entry !== null && $this->classifier->hasProfile() && $entry->isRead()
 					&& isset($state['fingerprints'][(string)$id]);
-				if ($entry === null || $preserveRead) {
+				if ($entry === null || $preserveRead || $tagDao->hasManualOverride((string)$id)) {
 					array_shift($state['pending']);
 					unset($state['failures'][(string)$id]);
-					if ($entry === null) {
+					if (!$preserveRead) {
 						unset($state['fingerprints'][(string)$id]);
 					}
 					$state['processed_ids'][] = $id;
 					ArticleTopicsStore::writeState($this->dir, $state);
+					if ($failure !== null && function_exists('invalidateHttpCache')) { invalidateHttpCache(); }
 					continue;
 				}
 				$beforeCalls = $this->classifier->llmCalls();
 				try {
-					if (class_exists('ArticleTopicsRetention') && ArticleTopicsRetention::isExpired($entry, $this->config)) {
+					if (!$protectExisting && ArticleTopicsRetention::isExpired($entry, $this->config)) {
 						// Old committed entries are intentionally not sent to a provider or re-labelled.
 						$this->apply($id, [], $prefix);
 						unset($state['failures'][(string)$id], $state['fingerprints'][(string)$id]);
@@ -174,6 +197,7 @@ final class ArticleTopicsWorker {
 						$state['pending'][] = $id;
 					}
 					ArticleTopicsStore::writeState($this->dir, $state);
+					if (function_exists('invalidateHttpCache')) { invalidateHttpCache(); }
 					fwrite(STDERR, "ArticleTopics recorded failure for entry {$id} (attempt {$attempts}).\n");
 					continue;
 				}
@@ -181,6 +205,7 @@ final class ArticleTopicsWorker {
 				$state['processed_ids'][] = $id;
 				$state['cursor_id'] = max((int)$state['cursor_id'], $id);
 				ArticleTopicsStore::writeState($this->dir, $state);
+				if ($failure !== null && function_exists('invalidateHttpCache')) { invalidateHttpCache(); }
 				$processed++;
 			}
 			fwrite(STDOUT, "ArticleTopics processed {$processed} article(s).\n");
@@ -198,7 +223,14 @@ final class ArticleTopicsWorker {
 		$max = max(1, (int)($this->config['max_attempts'] ?? $this->config['retry_max'] ?? 5));
 		$base = max(1, (int)($this->config['retry_base_seconds'] ?? 60));
 		$delay = $attempts >= $max ? PHP_INT_MAX - time() : min(86400, $base * (2 ** min(20, $attempts - 1)));
-		$state['failures'][$key] = ['attempts' => $attempts, 'next_retry_at' => time() + $delay, 'last_error' => mb_substr($error->getMessage(), 0, 1000)];
+		$previous = $state['failures'][$key] ?? [];
+		$reason = $error instanceof ArticleTopicsProviderError ? $error->reason : 'classification';
+		$state['failures'][$key] = [
+			'attempts' => $attempts, 'next_retry_at' => time() + $delay,
+			'last_error' => mb_substr($error->getMessage(), 0, 1000), 'reason' => $reason,
+			'first_at' => ($previous['reason'] ?? null) === $reason ? ($previous['first_at'] ?? time()) : time(),
+			'exhausted' => $attempts >= $max,
+		];
 		return $attempts;
 	}
 
@@ -215,6 +247,7 @@ final class ArticleTopicsWorker {
 		$profileActive = $this->classifier->hasProfile();
 		foreach ($page as $id) {
 			if (microtime(true) >= $this->deadline) { break; }
+			if ((int)($state['failures'][(string)$id]['next_retry_at'] ?? 0) > time()) { continue; }
 			$entry = $dao->searchById((string)$id);
 			if ($entry === null) { unset($state['fingerprints'][(string)$id], $state['failures'][(string)$id]); continue; }
 			// Adopting or editing a feed profile should not relabel the already-read archive.
@@ -231,6 +264,7 @@ final class ArticleTopicsWorker {
 	private function apply(int $entryId, array $names, string $prefix): void {
 		$dao = new ArticleTopicsAtomicTagDAO();
 		$dao->ensureOwnershipSchema(); // DDL is outside the data transaction (MySQL DDL can commit implicitly).
+		if ($dao->hasManualOverride((string)$entryId)) { return; }
 		$current = [];
 		foreach ($dao->getTagsForEntry((string)$entryId) as $tag) { if ($tag['checked']) { $current[(int)$tag['id']] = true; } }
 		$wanted = [];
@@ -245,6 +279,10 @@ final class ArticleTopicsWorker {
 		}
 		$dao->beginTransaction();
 		try {
+			if ($dao->hasManualOverride((string)$entryId)) {
+				$dao->rollBack();
+				return;
+			}
 			foreach (array_keys($current) as $tagId) {
 				if ($dao->owned((int)$tagId, (string)$entryId) && !isset($wanted[$tagId])) {
 					if (!$dao->removePairAndOwnership((int)$tagId, (string)$entryId)) {

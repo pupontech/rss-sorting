@@ -57,6 +57,8 @@ final class ArticleTopicsBackfill {
 			ArticleTopicsStore::assertNoCategoryCollisions($prefix, $taxonomy);
 			if (strtolower((string)($this->config['mode'] ?? 'hybrid')) !== 'keywords' && ($this->config['api_url'] ?? '') === '') { throw new RuntimeException('Provider URL is not configured.'); }
 			$classifier = new ArticleTopicsClassifier($this->config);
+			$tags = new ArticleTopicsAtomicTagDAO();
+			if (!$job['dry_run']) { $tags->ensureOwnershipSchema(); }
 			$worker = new ArticleTopicsWorker($this->usernameFromDir(), $this->config, $seconds);
 			$dao = FreshRSS_Factory::createEntryDao();
 			$visited = 0;
@@ -85,7 +87,7 @@ final class ArticleTopicsBackfill {
 				}
 				$beforeCalls = $classifier->llmCalls();
 				try {
-					if (class_exists('ArticleTopicsRetention') && ArticleTopicsRetention::isExpired($entry, $this->config)) {
+					if ((!$job['dry_run'] && $tags->hasManualOverride($id)) || ArticleTopicsRetention::isExpired($entry, $this->config)) {
 						$this->recordResult($jobId, $id, 'skipped', [], 0, null);
 						continue;
 					}

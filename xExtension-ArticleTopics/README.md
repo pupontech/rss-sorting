@@ -1,4 +1,4 @@
-# Article Topics 0.2.2-rc.1
+# Article Topics 0.2.2-rc.2
 
 Copy this directory into `extensions/` on FreshRSS 1.29.1 or later. Enable ArticleTopics for the FreshRSS user, then open its gear in Configuration → Extensions. The PHP/web account needs write access to `data/users/<user>/extensions/ArticleTopics/` and the user database.
 
@@ -46,9 +46,23 @@ Backfill can be queued in the UI or started using --scope=unread|7d|30d|all|feed
 
 The scheduler's `--next` uses the saved worker article and time budgets. Pass `--limit` or `--seconds` to override the corresponding setting for that invocation.
 
+New configurations default to Hybrid and one automatic topic. With a one-topic limit, Hybrid asks the provider to choose the main subject when keyword matches are weak, conflicting, missing, or point to multiple topics. AI Only asks the provider for every eligible article. Keywords Only runs locally. The Enable setting pauses the worker and retains its queue. Existing configurations retain their saved topic limit.
+
+Removing an automatic topic keeps the article out of future classification. SQLite records the removal immediately, including when the same tag is manually added again. On other supported databases the worker detects a missing owned association on its next check. The reading menu links to retry controls when the provider rejects access, reports exhausted credits, or continues to fail after retries.
+
 ### Per-user keyword profile
 
 Set up a profile in `data/users/<user>/extensions/ArticleTopics/keyword-profile.json`. Its `topics` list uses the same schema as the settings taxonomy. Set `feeds` to a map from numeric feed IDs to enabled topic names, `focused_feeds` to a list of numeric IDs from that map, and `fallback` to a distinct label name such as `Uncategorized`. Use an empty map and list if you have no feed defaults. Settings displays the active topics. Removing the profile restores the settings taxonomy.
+
+The bundled [one-topic profile](profiles/one-topic.json) provides ten browsing topics and tie-breaking guidance for the provider. Use it with a one-topic limit.
+
+To start the OpenAI new-arrivals trial, first back up the user database, config, and the extension's profile and state. From the FreshRSS installation root, run the following as the FreshRSS service account with a protected key file.
+
+```sh
+php extensions/xExtension-ArticleTopics/cli/start-trial.php --user=alice < /path/to/openai-key
+```
+
+The command sets Hybrid and one topic, installs the bundled vocabulary, and uses the current article IDs as the trial baseline. It protects existing labels from automatic reclassification and expiration during the trial. It also records the first 50 arrivals for review. The settings screen shows the start date and number of arrivals recorded.
 
 In Keywords Only mode, title and feed-tag matches have twice the weight of body matches and take priority when they reach a topic threshold. A focused feed always gets its default topic, with additional qualifying title or feed-tag matches up to the topic limit. Other feeds use their default when no topic qualifies. The fallback applies by itself when neither the article nor the feed yields a topic. The regular worker skips previously classified read articles when a profile is active. To revisit the archive, explicitly choose a backfill scope that includes it.
 

@@ -33,6 +33,7 @@ $allowedFiles = [
 	'README.md' => true,
 	'static/admin.js' => true,
 	'static/admin.css' => true,
+	'profiles/one-topic.json' => true,
 ];
 foreach ($iterator as $file) {
 	if (!$file->isFile()) continue;

@@ -25,3 +25,13 @@ assertSameValue(1, (int)$pdo->query("SELECT COUNT(*) FROM `_entrytag` WHERE id_e
 assertSameValue(1, (int)$pdo->query("SELECT COUNT(*) FROM `_at_owned` WHERE id_entry=202")->fetchColumn(), 'retry records ownership');
 $apply->invoke($worker, 202, [], 'Topic: ');
 assertSameValue(0, (int)$pdo->query("SELECT COUNT(*) FROM `_entrytag` WHERE id_entry=202")->fetchColumn(), 'reclassification removes extension-owned association');
+assertSameValue(0, (int)$pdo->query("SELECT COUNT(*) FROM `_at_override` WHERE id_entry=202")->fetchColumn(), 'extension removal does not block later classification');
+
+$apply->invoke($worker, 202, ['Games'], 'Topic: ');
+$pdo->exec('DELETE FROM `_entrytag` WHERE id_entry=202 AND id_tag=2');
+$apply->invoke($worker, 202, ['Games'], 'Topic: ');
+assertSameValue(0, (int)$pdo->query("SELECT COUNT(*) FROM `_entrytag` WHERE id_entry=202")->fetchColumn(), 'manual removal survives reclassification');
+$pdo->exec('INSERT INTO `_entrytag` (id_entry,id_tag) VALUES (202,2)');
+$apply->invoke($worker, 202, ['Different'], 'Topic: ');
+assertSameValue(0, (int)$pdo->query("SELECT COUNT(*) FROM `_at_owned` WHERE id_entry=202")->fetchColumn(), 'manual re-addition is not claimed');
+assertSameValue(1, (int)$pdo->query("SELECT COUNT(*) FROM `_entrytag` WHERE id_entry=202 AND id_tag=2")->fetchColumn(), 'manual re-addition remains the only label');

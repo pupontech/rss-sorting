@@ -1,4 +1,8 @@
 <?php declare(strict_types=1); /** @var ArticleTopicsExtension $this */
+if (!ArticleTopicsAccess::allows(Minz_User::name())) {
+	echo '<p class="alert alert-warn">Article Topics is unavailable for this account.</p>';
+	return;
+}
 $cfg = $this->adminData !== [] ? $this->adminData : $this->getConfigurationForAdmin();
 $diag = $this->adminData['diagnostics'] ?? ['counts'=>['pending'=>0,'processed'=>0,'failed'=>0],'methods'=>['keywords'=>0,'hybrid'=>0,'llm'=>0],'llm_share'=>0,'recent_failures'=>[]];
 $h = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
@@ -32,11 +36,25 @@ $topics = json_decode((string)($cfg['taxonomy_json'] ?? '[]'), true) ?: [];
 	<div class="form-group form-actions"><div class="group-controls"><button type="submit" class="btn btn-important">Save settings</button></div></div>
 </form>
 
-<fieldset><legend>Backfill</legend><p>Jobs are queued here. Classification runs only in the separate worker. Progress: scanned, labelled, skipped, failed and LLM calls.</p>
-	<h3>Diagnostics</h3><p>Pending <?= $h($diag['counts']['pending']) ?> ׳²ֲ²ײ²ֲ· processed <?= $h($diag['counts']['processed']) ?> ׳²ֲ²ײ²ֲ· failed <?= $h($diag['counts']['failed']) ?>. Classification method counts: keywords <?= $h($diag['methods']['keywords']) ?>, hybrid <?= $h($diag['methods']['hybrid']) ?>, LLM <?= $h($diag['methods']['llm']) ?>. LLM share of classifications: <?= $h($diag['llm_share']) ?>%.</p>
+<fieldset><legend>Backfill</legend><p>The worker processes queued jobs. Dry runs report how many articles would receive labels.</p>
+	<h3>Diagnostics</h3><p>Pending <?= $h($diag['counts']['pending']) ?> &middot; processed <?= $h($diag['counts']['processed']) ?> &middot; failed <?= $h($diag['counts']['failed']) ?>. Classification method counts: keywords <?= $h($diag['methods']['keywords']) ?>, hybrid <?= $h($diag['methods']['hybrid']) ?>, LLM <?= $h($diag['methods']['llm']) ?>. LLM share of classifications: <?= $h($diag['llm_share']) ?>%.</p>
 	<?php if ($diag['recent_failures'] !== []): ?><table class="table"><thead><tr><th>Entry</th><th>Attempts</th><th>Recent error</th></tr></thead><tbody><?php foreach ($diag['recent_failures'] as $failure): ?><tr><td><?= $h($failure['entry_id']) ?></td><td><?= $h($failure['attempts']) ?></td><td><?= $h($failure['last_error']) ?></td></tr><?php endforeach ?></tbody></table><?php endif ?>
 	<?php if (class_exists('ArticleTopicsBackfill')): $jobs = (new ArticleTopicsBackfill(basename(dirname(dirname($this->getExtensionUserPath()))), $cfg))->jobs(); ?>
-	<table class="table"><thead><tr><th>Job</th><th>Scope</th><th>Status</th><th>Scanned</th><th>Labelled</th><th>Skipped</th><th>Failed</th><th>LLM calls</th></tr></thead><tbody><?php foreach ($jobs as $job): ?><tr><?php foreach (['id','scope','status','scanned','labelled','skipped','failed','llm_calls'] as $field): ?><td><?= $h($job[$field] ?? 0) ?></td><?php endforeach ?></tr><?php endforeach ?></tbody></table>
+	<div class="article-topics-table-scroll">
+	<table class="table">
+		<thead><tr><th>Job</th><th>Scope</th><th>Status</th><th>Scanned</th><th>Labelled</th><th>Would label</th><th>Skipped</th><th>Failed</th><th>LLM calls</th></tr></thead>
+		<tbody>
+		<?php foreach ($jobs as $job): $dryRun = !empty($job['dry_run']); ?>
+			<tr>
+				<?php foreach (['id','scope','status','scanned'] as $field): ?><td><?= $h($job[$field] ?? 0) ?></td><?php endforeach ?>
+				<td><?= $dryRun ? '&ndash;' : $h($job['labelled'] ?? 0) ?></td>
+				<td><?= $dryRun ? $h($job['labelled'] ?? 0) : '&ndash;' ?></td>
+				<?php foreach (['skipped','failed','llm_calls'] as $field): ?><td><?= $h($job[$field] ?? 0) ?></td><?php endforeach ?>
+			</tr>
+		<?php endforeach ?>
+		</tbody>
+	</table>
+	</div>
 	<?php else: ?><p>Backfill service is not present yet.</p><?php endif ?>
 	<form method="post" action="<?= _url('extension', 'configure', 'e', urlencode($this->getName())) ?>"><input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" /><label>Scope <select name="backfill_scope"><?php foreach (['unread'=>'Unread','last_7_days'=>'Last 7 days','last_30_days'=>'Last 30 days','all'=>'All','feed'=>'Single feed','category'=>'Category','failed'=>'Failed only','taxonomy_changed'=>'Reclassify all after taxonomy change'] as $v=>$label): ?><option value="<?= $v ?>"><?= $label ?></option><?php endforeach ?></select></label> <label><input type="checkbox" name="backfill_dry_run" value="1" /> Dry run</label><label>Feed ID <input type="number" min="1" name="backfill_feed_id" /></label><label>Category ID <input type="number" min="1" name="backfill_category_id" /></label><button class="btn btn-important" name="admin_action" value="backfill">Queue backfill</button></form>
 	<form method="post" action="<?= _url('extension', 'configure', 'e', urlencode($this->getName())) ?>"><input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" /><button class="btn" name="admin_action" value="retry_failed">Retry failed backfill</button></form>

@@ -23,3 +23,13 @@ The control surface and twelve prompt fixtures support scenarios for initial cla
 ## Full assertions
 
 Run `./tests/integration/run.ps1 -Mode Assertions` against the installed disposable checkout. This creates a fresh m2test-prefixed user and runs `assert_m2.php`, then `assert_backfill.php` when `lib/ArticleTopicsBackfill.php` and `cli/backfill.php` are installed, followed by refresh-isolation checks and the Google Reader API verifier. Backfill assertions cover dry-run isolation, page-resume across service instances, creation-time high-water bounds, unread/feed scopes, read/star preservation, and per-user lock contention. Ports 8081 and 8088 must be free. It stops its servers but retains the test user. The runner reports missing backfill implementation files rather than treating the M2 pass as complete M3/M4 validation.
+
+## Release upgrade test
+
+Build the ZIP with `php scripts/build-release.php`. Run the following with Python Playwright installed, using local archives and executable paths.
+
+```text
+python tests/integration/verify_release.py --freshrss FRESHRSS_ZIP --release CANDIDATE_ZIP --previous RELEASE_0_2_1_ZIP --php PHP_EXE --chromium CHROMIUM_EXE --linked
+```
+
+The test installs FreshRSS in a disposable directory, applies the previous extension release, and replaces its files with the candidate. It uses a local fixture feed and a synthetic per-user profile to verify the settings and workers. `--linked` tests a linked extensions directory with the same root override used by the LinuxServer worker commands. The test invokes both jobs directly.

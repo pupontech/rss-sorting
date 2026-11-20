@@ -2,7 +2,7 @@
 <?php
 declare(strict_types=1);
 
-require dirname(__DIR__, 3) . '/cli/_cli.php';
+require_once __DIR__ . '/bootstrap.php';
 require_once dirname(__DIR__) . '/lib/ArticleTopicsStore.php';
 require_once dirname(__DIR__) . '/lib/ArticleTopicsWorker.php';
 
@@ -16,6 +16,7 @@ $options = new class extends CliOptionsParser {
 	}
 };
 if (!empty($options->errors)) { fail(array_shift($options->errors) . "\n" . $options->usage); }
+if (!ArticleTopicsAccess::allows($options->user)) { fail('Article Topics is unavailable for this account.'); }
 $username = cliInitUser($options->user);
 $extensions = FreshRSS_Context::userConf()->extensions ?? [];
 $config = is_array($extensions) ? ($extensions['ArticleTopics'] ?? []) : [];

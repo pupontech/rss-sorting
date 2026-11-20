@@ -2,7 +2,7 @@
 <?php
 declare(strict_types=1);
 
-require dirname(__DIR__, 3) . '/cli/_cli.php';
+require_once __DIR__ . '/bootstrap.php';
 require_once dirname(__DIR__) . '/lib/ArticleTopicsStore.php';
 require_once dirname(__DIR__) . '/lib/ArticleTopicsBackfill.php';
 
@@ -12,8 +12,8 @@ $options = new class extends CliOptionsParser {
 	public string $scope = '';
 	public string $feedId = '';
 	public string $categoryId = '';
-	public int $limit = 50;
-	public int $seconds = 20;
+	public ?int $limit = null;
+	public ?int $seconds = null;
 	public bool $dryRun = false;
 	public bool $next = false;
 	public function __construct() {
@@ -30,13 +30,16 @@ $options = new class extends CliOptionsParser {
 	}
 };
 if (!empty($options->errors)) { fail(array_shift($options->errors) . "\n" . $options->usage); }
+if (!ArticleTopicsAccess::allows($options->user)) { fail('Article Topics is unavailable for this account.'); }
 $username = cliInitUser($options->user);
 $extensions = FreshRSS_Context::userConf()->extensions ?? [];
 $config = is_array($extensions) ? ($extensions['ArticleTopics'] ?? []) : [];
 if (!is_array($config)) { $config = []; }
 $engine = new ArticleTopicsBackfill($username, $config);
-$limit = filter_var($options->limit, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 500]]);
-$seconds = filter_var($options->seconds, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 300]]);
+$scheduledLimit = $options->next ? ($config['worker_limit'] ?? 50) : 50;
+$scheduledSeconds = $options->next ? ($config['worker_seconds'] ?? 20) : 20;
+$limit = filter_var($options->limit ?? $scheduledLimit, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 500]]);
+$seconds = filter_var($options->seconds ?? $scheduledSeconds, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 300]]);
 if (!is_int($limit) || !is_int($seconds)) { fail('Invalid --limit or --seconds budget.'); }
 try {
 	if ($options->next) {

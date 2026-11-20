@@ -5,6 +5,7 @@ require_once __DIR__ . '/lib/ArticleTopicsStore.php';
 require_once __DIR__ . '/lib/ArticleTopicsClassifier.php';
 require_once __DIR__ . '/lib/ArticleTopicsLlmClient.php';
 require_once __DIR__ . '/lib/ArticleTopicsAdmin.php';
+require_once __DIR__ . '/lib/ArticleTopicsAccess.php';
 // Backfill is developed independently; admin actions are unavailable until its contract lands.
 if (is_file(__DIR__ . '/lib/ArticleTopicsBackfill.php')) {
 	require_once __DIR__ . '/lib/ArticleTopicsBackfill.php';
@@ -16,6 +17,12 @@ final class ArticleTopicsExtension extends Minz_Extension {
 	public array $adminData = [];
 
 	public function init(): void {
+		if (!ArticleTopicsAccess::allows(Minz_User::name())) {
+			return;
+		}
+		if (Minz_Request::controllerName() === 'extension') {
+			$this->registerAdminAssets();
+		}
 		foreach ([
 			'enabled' => false, 'api_url' => '', 'api_key' => '', 'model' => 'gpt-4o-mini',
 			'label_prefix' => 'Topic: ', 'content_limit' => 5000,
@@ -27,6 +34,11 @@ final class ArticleTopicsExtension extends Minz_Extension {
 		] as $key => $value) {
 			if ($this->getUserConfigurationValue($key) === null) { $this->setUserConfigurationValue($key, $value); }
 		}
+	}
+
+	private function registerAdminAssets(): void {
+		Minz_View::appendScript($this->getFileUrl('admin.js'), async: false);
+		Minz_View::appendStyle($this->getFileUrl('admin.css'));
 	}
 
 	/** Public, secret-safe configuration seam for the admin view and unit tests. */
@@ -51,12 +63,27 @@ final class ArticleTopicsExtension extends Minz_Extension {
 	}
 
 	public function handleConfigureAction(): void {
-		Minz_View::appendScript($this->getFileUrl('admin.js'));
-		Minz_View::appendStyle($this->getFileUrl('admin.css'));
+		// FreshRSS timestamps its cache validators to the second. Reopening the
+		// slider immediately after a save must fetch the persisted settings.
+		header('Cache-Control: private, no-store');
+		header_remove('ETag');
+		header_remove('Last-Modified');
+		if (!ArticleTopicsAccess::allows(Minz_User::name())) {
+			return;
+		}
+		$this->registerAdminAssets();
 		$this->adminData = $this->getConfigurationForAdmin();
 		$this->adminData['diagnostics'] = ArticleTopicsAdmin::diagnostics($this->getExtensionUserPath());
-		if (!Minz_Request::isPost()) { return; }
 		try {
+			if (!Minz_Request::isPost()) {
+				$profile = ArticleTopicsClassifier::loadProfile();
+				if ($profile !== null) {
+					$names = array_column(array_filter($profile['topics'], static fn(array $topic): bool => $topic['enabled']), 'name');
+					$names[] = $profile['fallback'];
+					$this->notice = 'Active keyword profile: ' . implode(', ', $names) . '. Edit keyword-profile.json to change these topics or their feed defaults. The topic table below is used when that file is absent.';
+				}
+				return;
+			}
 			$action = Minz_Request::paramString('admin_action', plaintext: true);
 			if ($action === 'health_check') { $this->notice = ArticleTopicsAdmin::healthCheck($this->getRuntimeConfiguration()); return; }
 			if ($action === 'preview') {

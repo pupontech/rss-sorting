@@ -101,6 +101,7 @@ final class ArticleTopicsWorker {
 			}
 			ArticleTopicsStore::writeState($this->dir, $state);
 			$this->classifier = new ArticleTopicsClassifier($this->config);
+			$allowedNames = $this->classifier->allowedNames($taxonomy);
 			$this->discoverChanged($state, $taxonomy);
 			$processed = 0;
 			$visited = 0;
@@ -121,9 +122,14 @@ final class ArticleTopicsWorker {
 				}
 				$visited++;
 				$entry = FreshRSS_Factory::createEntryDao()->searchById((string)$id);
-				if ($entry === null) {
+				$preserveRead = $entry !== null && $this->classifier->hasProfile() && $entry->isRead()
+					&& isset($state['fingerprints'][(string)$id]);
+				if ($entry === null || $preserveRead) {
 					array_shift($state['pending']);
-					unset($state['failures'][(string)$id], $state['fingerprints'][(string)$id]);
+					unset($state['failures'][(string)$id]);
+					if ($entry === null) {
+						unset($state['fingerprints'][(string)$id]);
+					}
 					$state['processed_ids'][] = $id;
 					ArticleTopicsStore::writeState($this->dir, $state);
 					continue;
@@ -144,7 +150,6 @@ final class ArticleTopicsWorker {
 					$inputs = $this->classifier->inputs($entry);
 					$key = $this->classifier->cacheKey($inputs, $taxonomy);
 					$result = $state['cache'][$key] ?? null;
-					$allowedNames = array_column($taxonomy, 'name');
 					$validCache = is_array($result) && is_array($result['names'] ?? null) && array_is_list($result['names']) && in_array($result['method'] ?? null, ['keywords', 'hybrid', 'llm'], true);
 					if ($validCache) { foreach ($result['names'] as $cachedName) { if (!is_string($cachedName) || !in_array($cachedName, $allowedNames, true)) { $validCache = false; break; } } }
 					if (!$validCache) {
@@ -207,10 +212,13 @@ final class ArticleTopicsWorker {
 		if (count($page) < $limit && $offset > 0) { $page = array_merge($page, array_slice($ids, 0, $limit - count($page))); }
 		$pending = array_fill_keys(array_map('strval', $state['pending']), true);
 		$dao = FreshRSS_Factory::createEntryDao();
+		$profileActive = $this->classifier->hasProfile();
 		foreach ($page as $id) {
 			if (microtime(true) >= $this->deadline) { break; }
 			$entry = $dao->searchById((string)$id);
 			if ($entry === null) { unset($state['fingerprints'][(string)$id], $state['failures'][(string)$id]); continue; }
+			// Adopting or editing a feed profile should not relabel the already-read archive.
+			if ($profileActive && $entry->isRead()) { continue; }
 			$key = $this->classifier->cacheKey($this->classifier->inputs($entry), $taxonomy);
 			if (($state['fingerprints'][(string)$id] ?? null) !== $key && !isset($pending[(string)$id])) { $state['pending'][] = (int)$id; $pending[(string)$id] = true; }
 		}

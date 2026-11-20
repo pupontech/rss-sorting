@@ -7,59 +7,196 @@ $cfg = $this->adminData !== [] ? $this->adminData : $this->getConfigurationForAd
 $diag = $this->adminData['diagnostics'] ?? ['counts'=>['pending'=>0,'processed'=>0,'failed'=>0],'methods'=>['keywords'=>0,'hybrid'=>0,'llm'=>0],'llm_share'=>0,'recent_failures'=>[]];
 $h = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 $topics = json_decode((string)($cfg['taxonomy_json'] ?? '[]'), true) ?: [];
+$modes = ['keywords' => 'Keywords Only', 'hybrid' => 'Hybrid', 'llm' => 'AI Only'];
+$counts = $diag['counts'];
+$actionUrl = _url('extension', 'configure', 'e', urlencode($this->getName()));
 ?>
-<form action="<?= _url('extension', 'configure', 'e', urlencode($this->getName())) ?>" method="post" id="article-topics-form">
-	<input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" />
-	<?php if ($this->error !== ''): ?><div class="alert alert-error"><?= $h($this->error) ?></div><?php endif ?>
-	<?php if ($this->notice !== ''): ?><div class="alert alert-success"><?= $h($this->notice) ?></div><?php endif ?>
-	<legend>Article topic classifier</legend>
-	<p>Classification runs in the separately scheduled CLI worker. The provider receives article titles, summaries and content from articles processed by the worker or preview.</p>
-	<div class="form-group"><label class="group-name" for="enabled">Enable</label><div class="group-controls"><input type="checkbox" id="enabled" name="enabled" value="1" <?= !empty($cfg['enabled']) ? 'checked' : '' ?> /></div></div>
-	<fieldset><legend>Topics</legend><p>Add, edit or disable topics here. Keywords use phrase weights; comma-separated negative phrases exclude a topic. Deleting a row removes it from the active taxonomy.</p>
-	<div id="topic-scroll"><table class="table contents"><thead><tr><th>Name</th><th>Enabled</th><th>Description</th><th>Positive phrases (phrase:weight)</th><th>Negative phrases</th><th>Threshold</th><th></th></tr></thead><tbody id="topic-rows">
-	<?php foreach ($topics as $i=>$topic): ?>
-	<tr data-exclusions="<?= $h(json_encode($topic['exclusions'] ?? [])) ?>"><td><input class="topic-name" value="<?= $h($topic['name'] ?? '') ?>" /></td><td><input class="topic-enabled" type="checkbox" <?= ($topic['enabled'] ?? true) ? 'checked' : '' ?> /></td><td><input class="topic-description" value="<?= $h($topic['description'] ?? '') ?>" /></td><td><textarea class="topic-positive" rows="2"><?= $h(implode(', ', array_map(static fn($k,$v): string => $k . ':' . $v, array_keys($topic['positive_keywords'] ?? []), array_values($topic['positive_keywords'] ?? [])))) ?></textarea></td><td><textarea class="topic-negative" rows="2"><?= $h(implode(', ', $topic['negative_keywords'] ?? [])) ?></textarea></td><td><input class="topic-threshold" type="number" min="0" step="0.1" value="<?= $h($topic['threshold'] ?? 2) ?>" /></td><td><button type="button" class="btn topic-delete">Delete</button></td></tr>
-	<?php endforeach ?>
-	</tbody></table></div><button type="button" class="btn" id="topic-add">Add topic</button>
-	<input type="hidden" id="taxonomy_json" name="taxonomy_json" />
-	<details><summary>Advanced taxonomy JSON</summary><p>Current JSON is available for copying; the topic table is authoritative when saving.</p><pre><?= $h(json_encode($topics, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)) ?></pre></details></fieldset>
-	<div class="form-group"><label class="group-name" for="label_prefix">Label prefix</label><div class="group-controls"><input class="w100" id="label_prefix" name="label_prefix" value="<?= $h($cfg['label_prefix'] ?? 'Topic: ') ?>" /><p class="help">Names are checked against existing feed categories.</p></div></div>
-	<div class="form-group"><label class="group-name" for="api_url">Provider base URL</label><div class="group-controls"><input class="w100" type="url" id="api_url" name="api_url" value="<?= $h($cfg['api_url'] ?? '') ?>" placeholder="http://localhost:8080/v1" /></div></div>
-	<div class="form-group">
-		<label class="group-name" for="model">Model</label>
-		<div class="group-controls">
-			<div class="article-topics-model-row">
-				<input class="w100" id="model" name="model" value="<?= $h($cfg['model'] ?? '') ?>" />
-				<button type="button" class="btn" id="article-topics-load-models">Load models</button>
-			</div>
-			<label id="article-topics-model-options" hidden>Available models
-				<select class="w100" aria-label="Available models"></select>
-			</label>
-			<p class="help" id="article-topics-model-status" role="status"></p>
+<div class="article-topics-settings">
+	<?php if ($this->error !== ''): ?><div class="alert alert-error" role="alert"><?= $h($this->error) ?></div><?php endif ?>
+	<?php if ($this->notice !== ''): ?><div class="alert alert-success" role="status"><?= $h($this->notice) ?></div><?php endif ?>
+	<?php if ($this->previewResult !== null): ?>
+		<div class="alert alert-success" role="status">
+			<strong>Preview result</strong>
+			<p><?= $h($this->previewResult['names'] === [] ? 'No topic matched.' : implode(', ', $this->previewResult['names'])) ?></p>
 		</div>
-	</div>
-	<div class="form-group"><label class="group-name" for="api_key">API key</label><div class="group-controls"><input class="w100" type="password" id="api_key" name="api_key" autocomplete="new-password" value="" /><p class="help"><?= !empty($cfg['api_key_configured']) ? 'A key is saved for this provider. Enter a new key if you switch providers.' : 'Leave blank for providers without authentication.' ?></p></div></div>
-	<div class="form-group"><label class="group-name">Provider health</label><div class="group-controls"><button class="btn" name="admin_action" value="health_check">Check provider</button><p class="help">Sends a short request only to the configured endpoint; timeout is 3 seconds.</p></div></div>
-	<div class="form-group"><label class="group-name" for="mode">Classification</label><div class="group-controls"><select id="mode" name="mode"><?php foreach (['keywords'=>'Keywords Only','hybrid'=>'Hybrid','llm'=>'AI Only'] as $v=>$label): ?><option value="<?= $v ?>" <?= ($cfg['mode'] ?? 'hybrid') === $v ? 'selected' : '' ?>><?= $label ?></option><?php endforeach ?></select> Max topics <input type="number" min="1" max="20" name="max_topics" value="<?= $h($cfg['max_topics'] ?? 1) ?>" /> Confidence threshold <input type="number" min="0" max="1" step="0.01" name="confidence_threshold" value="<?= $h($cfg['confidence_threshold'] ?? 0) ?>" /></div></div>
-	<div class="form-group"><label class="group-name">Worker</label><div class="group-controls">Articles per run <input type="number" min="1" max="500" name="worker_limit" value="<?= $h($cfg['worker_limit'] ?? 50) ?>" /> Seconds per run <input type="number" min="1" max="300" name="worker_seconds" value="<?= $h($cfg['worker_seconds'] ?? 20) ?>" /> Max attempts <input type="number" min="1" max="5" name="max_attempts" value="<?= $h($cfg['max_attempts'] ?? 5) ?>" /> Retry base seconds <input type="number" min="1" name="retry_base_seconds" value="<?= $h($cfg['retry_base_seconds'] ?? 60) ?>" /></div></div>
-	<div class="form-group"><label class="group-name">Retention</label><div class="group-controls"><label><input type="checkbox" name="retention_enabled" value="1" <?= !empty($cfg['retention_enabled']) ? 'checked' : '' ?> /> Remove extension-owned topic labels after</label> <input type="number" min="1" name="retention_days" value="<?= $h($cfg['retention_days'] ?? '') ?>" placeholder="FreshRSS keep_period" /> days (blank uses FreshRSS setting)</div></div>
-	<div class="form-group"><label class="group-name">LLM options</label><div class="group-controls"><select name="response_format"><?php foreach (['json_schema'=>'JSON schema','json_object'=>'JSON object','plain'=>'Plain JSON'] as $v=>$label): ?><option value="<?= $v ?>" <?= ($cfg['response_format'] ?? 'json_object') === $v ? 'selected' : '' ?>><?= $label ?></option><?php endforeach ?></select> Reasoning <select name="reasoning_effort"><?php foreach ([''=>'Default','none'=>'None','low'=>'Low','medium'=>'Medium','high'=>'High'] as $v=>$label): ?><option value="<?= $v ?>" <?= ($cfg['reasoning_effort'] ?? '') === $v ? 'selected' : '' ?>><?= $label ?></option><?php endforeach ?></select> <label><input type="checkbox" name="think" value="1" <?= ($cfg['think'] ?? null) === false ? 'checked' : '' ?> /> Send think=false</label></div></div>
-	<div class="form-group"><label class="group-name" for="content_limit">Content limit</label><div class="group-controls"><input type="number" min="500" max="20000" id="content_limit" name="content_limit" value="<?= $h($cfg['content_limit'] ?? 5000) ?>" /></div></div>
-	<div class="form-group form-actions"><div class="group-controls"><button type="submit" class="btn btn-important">Save settings</button></div></div>
-</form>
-
-<fieldset><legend>Backfill</legend><p>The worker processes queued jobs. Dry runs report how many articles would receive labels.</p>
-	<?php if (!empty($diag['trial_started_at'])): ?>
-		<p>New-arrivals trial started <?= $h(gmdate('Y-m-d H:i', $diag['trial_started_at'])) ?> UTC. <?= $h($diag['trial_articles']) ?> of the first 50 arrivals recorded.</p>
+		<details class="article-topics-disclosure">
+			<summary>Preview details</summary>
+			<pre><?= $h(json_encode($this->previewResult, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?></pre>
+		</details>
 	<?php endif ?>
-	<h3>Diagnostics</h3><p>Pending <?= $h($diag['counts']['pending']) ?> &middot; processed <?= $h($diag['counts']['processed']) ?> &middot; failed <?= $h($diag['counts']['failed']) ?>. Classification method counts: keywords <?= $h($diag['methods']['keywords']) ?>, hybrid <?= $h($diag['methods']['hybrid']) ?>, LLM <?= $h($diag['methods']['llm']) ?>. LLM share of classifications: <?= $h($diag['llm_share']) ?>%.</p>
-	<?php if ($diag['recent_failures'] !== []): ?><table class="table"><thead><tr><th>Entry</th><th>Attempts</th><th>Recent error</th></tr></thead><tbody><?php foreach ($diag['recent_failures'] as $failure): ?><tr><td><?= $h($failure['entry_id']) ?></td><td><?= $h($failure['attempts']) ?></td><td><?= $h($failure['last_error']) ?></td></tr><?php endforeach ?></tbody></table><?php endif ?>
-	<form id="article-topics-retry" method="post" action="<?= _url('extension', 'configure', 'e', urlencode($this->getName())) ?>">
+
+	<dl class="article-topics-counts" aria-label="Classification activity">
+		<div><dt>Pending</dt><dd><?= $h($counts['pending']) ?></dd></div>
+		<div><dt>Processed</dt><dd><?= $h($counts['processed']) ?></dd></div>
+		<div><dt>Failed</dt><dd><?= $h($counts['failed']) ?></dd></div>
+	</dl>
+	<?php if ($counts['failed'] > 0): ?>
+		<p class="alert alert-warn">Some articles could not be classified. Review recent failures below.</p>
+	<?php endif ?>
+	<details class="article-topics-disclosure" <?= $counts['failed'] > 0 ? 'open' : '' ?>>
+		<summary>Activity details</summary>
+		<div class="article-topics-stack">
+			<p>Keywords <?= $h($diag['methods']['keywords']) ?> &middot; Hybrid <?= $h($diag['methods']['hybrid']) ?> &middot; AI Only <?= $h($diag['methods']['llm']) ?> &middot; AI used in <?= $h($diag['llm_share']) ?>% of classifications.</p>
+			<?php if (!empty($diag['trial_started_at'])): ?>
+				<p>New-arrivals trial &middot; <?= $h($diag['trial_articles']) ?> of the first 50 arrivals recorded since <?= $h(gmdate('Y-m-d H:i', $diag['trial_started_at'])) ?> UTC.</p>
+			<?php endif ?>
+			<?php if ($diag['recent_failures'] !== []): ?>
+				<div class="article-topics-table-scroll" tabindex="0" role="region" aria-label="Recent classification failures">
+					<table class="table">
+						<thead><tr><th>Entry</th><th>Attempts</th><th>Recent error</th></tr></thead>
+						<tbody><?php foreach ($diag['recent_failures'] as $failure): ?>
+							<tr><td><?= $h($failure['entry_id']) ?></td><td><?= $h($failure['attempts']) ?></td><td><?= $h($failure['last_error']) ?></td></tr>
+						<?php endforeach ?></tbody>
+					</table>
+				</div>
+			<?php endif ?>
+			<?php if ($counts['failed'] > 0): ?>
+				<form id="article-topics-retry" method="post" action="<?= $actionUrl ?>">
+					<input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" />
+					<button class="btn" name="admin_action" value="retry_live">Retry failed classifications</button>
+				</form>
+			<?php endif ?>
+		</div>
+	</details>
+
+	<form action="<?= $actionUrl ?>" method="post" id="article-topics-form">
 		<input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" />
-		<button class="btn" name="admin_action" value="retry_live" <?= $diag['counts']['failed'] === 0 ? 'disabled' : '' ?>>Retry failed classifications</button>
+		<section class="article-topics-section article-topics-stack" aria-labelledby="article-topics-classification">
+			<h3 id="article-topics-classification">Classification</h3>
+			<label class="article-topics-check"><input type="checkbox" id="enabled" name="enabled" value="1" <?= !empty($cfg['enabled']) ? 'checked' : '' ?> /> Enable automatic topic labels</label>
+			<label class="article-topics-field" for="mode">
+				<span>Mode</span>
+				<select id="mode" name="mode" aria-describedby="article-topics-mode-help">
+					<?php foreach ($modes as $value => $label): ?>
+						<option value="<?= $value ?>" <?= ($cfg['mode'] ?? 'hybrid') === $value ? 'selected' : '' ?>><?= $label ?></option>
+					<?php endforeach ?>
+				</select>
+				<span class="article-topics-help" id="article-topics-mode-help">Hybrid tries keywords first and uses AI when keyword rules leave the result uncertain.</span>
+			</label>
+			<div class="article-topics-grid">
+				<label class="article-topics-field"><span>Max topics per article</span><input type="number" min="1" max="20" name="max_topics" value="<?= $h($cfg['max_topics'] ?? 1) ?>" /></label>
+				<label class="article-topics-field"><span>Label prefix</span><input id="label_prefix" name="label_prefix" value="<?= $h($cfg['label_prefix'] ?? 'Topic: ') ?>" /><span class="article-topics-help">Label names are checked against feed categories.</span></label>
+			</div>
+		</section>
+
+		<section class="article-topics-section article-topics-stack" aria-labelledby="article-topics-provider">
+			<h3 id="article-topics-provider">AI provider</h3>
+			<p class="article-topics-help">Hybrid and AI Only can send article titles, summaries, and content to your configured provider.</p>
+			<label class="article-topics-field" for="api_url"><span>Provider base URL</span><input type="url" id="api_url" name="api_url" value="<?= $h($cfg['api_url'] ?? '') ?>" placeholder="https://api.openai.com/v1" /></label>
+			<label class="article-topics-field" for="api_key">
+				<span>API key</span>
+				<input type="password" id="api_key" name="api_key" autocomplete="new-password" value="" />
+				<span class="article-topics-help"><?= !empty($cfg['api_key_configured']) ? 'A key is saved. Enter a new key if you switch providers.' : 'Leave blank for providers without authentication.' ?></span>
+			</label>
+			<div class="article-topics-stack article-topics-model">
+				<label for="model"><strong>Model</strong></label>
+				<div class="article-topics-model-row">
+					<input id="model" name="model" value="<?= $h($cfg['model'] ?? '') ?>" aria-describedby="article-topics-model-status" />
+					<button type="button" class="btn" id="article-topics-load-models">Load models</button>
+				</div>
+				<label class="article-topics-field" id="article-topics-model-options" hidden><span>Available models</span><select aria-label="Available models"></select></label>
+				<p class="article-topics-help" id="article-topics-model-status" role="status"></p>
+			</div>
+			<div class="article-topics-model-row">
+				<button type="submit" class="btn" name="admin_action" value="health_check" aria-describedby="article-topics-provider-help">Check provider</button>
+				<p class="article-topics-help" id="article-topics-provider-help">Tests your saved connection.</p>
+			</div>
+		</section>
+
+		<?php if ($this->profileError !== ''): ?>
+			<p class="alert alert-warn" role="alert">Keyword profile error. <?= $h($this->profileError) ?></p>
+		<?php elseif ($this->activeProfileTopics !== []): ?>
+			<div class="article-topics-section article-topics-stack">
+			<p>Active keyword profile: <?= $h(implode(', ', $this->activeProfileTopics)) ?></p>
+				<p class="article-topics-help">Edit <code>keyword-profile.json</code> to change these topics or feed defaults. The rules below apply when the profile file is absent.</p>
+			</div>
+		<?php endif ?>
+		<details class="article-topics-disclosure" id="article-topics-taxonomy">
+			<summary><?= $this->activeProfileTopics === [] ? 'Topics' : 'Fallback topic rules' ?></summary>
+			<div class="article-topics-stack">
+				<p class="article-topics-help">Choose a topic to edit its rules. Separate phrases with commas. Add a weight like <code>example:2</code> for positive matches.</p>
+				<div id="topic-rows">
+					<?php
+					$renderTopic = static function (array $topic) use ($h): void {
+						$name = $topic['name'] ?? '';
+						require __DIR__ . '/views/topic-editor.phtml';
+					};
+					foreach ($topics as $topic) {
+						$renderTopic($topic);
+					}
+					?>
+				</div>
+				<template id="article-topics-topic-template"><?php $renderTopic([]); ?></template>
+				<div><button type="button" class="btn" id="topic-add">Add topic</button></div>
+				<input type="hidden" id="taxonomy_json" name="taxonomy_json" />
+				<details class="article-topics-disclosure">
+					<summary>Saved taxonomy JSON</summary>
+					<pre><?= $h(json_encode($topics, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?></pre>
+				</details>
+			</div>
+		</details>
+
+		<details class="article-topics-disclosure" id="article-topics-advanced">
+			<summary>Advanced settings</summary>
+			<div class="article-topics-stack">
+				<h4>Classification and provider</h4>
+				<div class="article-topics-grid">
+					<label class="article-topics-field"><span>Confidence threshold</span><input type="number" min="0" max="1" step="0.01" name="confidence_threshold" value="<?= $h($cfg['confidence_threshold'] ?? 0) ?>" /></label>
+					<label class="article-topics-field"><span>Content limit (characters)</span><input type="number" min="500" max="20000" id="content_limit" name="content_limit" value="<?= $h($cfg['content_limit'] ?? 5000) ?>" /></label>
+					<label class="article-topics-field"><span>Response format</span><select name="response_format"><?php foreach (['json_schema'=>'JSON schema','json_object'=>'JSON object','plain'=>'Plain JSON'] as $value=>$label): ?><option value="<?= $value ?>" <?= ($cfg['response_format'] ?? 'json_object') === $value ? 'selected' : '' ?>><?= $label ?></option><?php endforeach ?></select></label>
+					<label class="article-topics-field"><span>Reasoning effort</span><select name="reasoning_effort"><?php foreach ([''=>'Default','none'=>'None','low'=>'Low','medium'=>'Medium','high'=>'High'] as $value=>$label): ?><option value="<?= $value ?>" <?= ($cfg['reasoning_effort'] ?? '') === $value ? 'selected' : '' ?>><?= $label ?></option><?php endforeach ?></select></label>
+				</div>
+				<label class="article-topics-check"><input type="checkbox" name="think" value="1" <?= ($cfg['think'] ?? null) === false ? 'checked' : '' ?> /> Send <code>think=false</code></label>
+				<h4>Worker</h4>
+				<div class="article-topics-grid">
+					<label class="article-topics-field"><span>Articles per run</span><input type="number" min="1" max="500" name="worker_limit" value="<?= $h($cfg['worker_limit'] ?? 50) ?>" /></label>
+					<label class="article-topics-field"><span>Seconds per run</span><input type="number" min="1" max="300" name="worker_seconds" value="<?= $h($cfg['worker_seconds'] ?? 20) ?>" /></label>
+					<label class="article-topics-field"><span>Max attempts</span><input type="number" min="1" max="5" name="max_attempts" value="<?= $h($cfg['max_attempts'] ?? 5) ?>" /></label>
+					<label class="article-topics-field"><span>Initial retry delay (seconds)</span><input type="number" min="1" name="retry_base_seconds" value="<?= $h($cfg['retry_base_seconds'] ?? 60) ?>" /></label>
+				</div>
+				<h4>Retention</h4>
+				<label class="article-topics-check"><input type="checkbox" name="retention_enabled" value="1" <?= !empty($cfg['retention_enabled']) ? 'checked' : '' ?> /> Remove older labels applied by Article Topics</label>
+				<label class="article-topics-field"><span>Keep labels for (days)</span><input type="number" min="1" name="retention_days" value="<?= $h($cfg['retention_days'] ?? '') ?>" /><span class="article-topics-help">Leave blank to use the FreshRSS retention setting.</span></label>
+			</div>
+		</details>
+		<div class="article-topics-save"><button type="submit" class="btn btn-important">Save settings</button></div>
 	</form>
+
+	<section class="article-topics-section article-topics-stack" aria-labelledby="article-topics-preview">
+		<h3 id="article-topics-preview">Test a classification</h3>
+		<p class="article-topics-help">Uses your saved settings to classify sample text without changing any articles.</p>
+		<form method="post" action="<?= $actionUrl ?>" class="article-topics-stack">
+			<input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" />
+			<input type="hidden" name="admin_action" value="preview" />
+			<label class="article-topics-field"><span>Title</span><input name="preview_title" maxlength="5000" /></label>
+			<label class="article-topics-field"><span>Body</span><textarea name="preview_body" rows="4" maxlength="20000"></textarea></label>
+			<div><button class="btn" type="submit">Preview</button></div>
+		</form>
+	</section>
+
+	<section class="article-topics-section article-topics-stack" aria-labelledby="article-topics-backfill">
+		<h3 id="article-topics-backfill">Backfill existing articles</h3>
+		<p class="article-topics-help">Queue existing articles for the worker. Use a dry run to see how many would receive labels.</p>
+		<form method="post" action="<?= $actionUrl ?>" class="article-topics-stack">
+			<input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" />
+			<div class="article-topics-grid article-topics-backfill-fields">
+				<label class="article-topics-field"><span>Scope</span><select name="backfill_scope">
+					<?php foreach (['unread'=>'Unread','last_7_days'=>'Last 7 days','last_30_days'=>'Last 30 days','all'=>'All','feed'=>'Single feed','category'=>'Category','failed'=>'Failed only','taxonomy_changed'=>'Reclassify all after taxonomy change'] as $value=>$label): ?>
+						<option value="<?= $value ?>"><?= $label ?></option>
+					<?php endforeach ?>
+				</select></label>
+				<label class="article-topics-field" data-backfill-scope="feed"><span>Feed ID</span><input type="number" min="1" name="backfill_feed_id" /></label>
+				<label class="article-topics-field" data-backfill-scope="category"><span>Category ID</span><input type="number" min="1" name="backfill_category_id" /></label>
+			</div>
+			<label class="article-topics-check"><input type="checkbox" name="backfill_dry_run" value="1" /> Dry run</label>
+			<div><button class="btn" name="admin_action" value="backfill">Queue backfill</button></div>
+		</form>
+		<details class="article-topics-disclosure" open>
+			<summary>Backfill jobs</summary>
+			<div class="article-topics-stack">
 	<?php if (class_exists('ArticleTopicsBackfill')): $jobs = (new ArticleTopicsBackfill(basename(dirname(dirname($this->getExtensionUserPath()))), $cfg))->jobs(); ?>
-	<div class="article-topics-table-scroll">
+	<?php if ($jobs !== []): ?>
+	<div class="article-topics-table-scroll" tabindex="0" role="region" aria-label="Backfill jobs">
 	<table class="table">
 		<thead><tr><th>Job</th><th>Scope</th><th>Status</th><th>Scanned</th><th>Labelled</th><th>Would label</th><th>Skipped</th><th>Failed</th><th>LLM calls</th></tr></thead>
 		<tbody>
@@ -74,8 +211,13 @@ $topics = json_decode((string)($cfg['taxonomy_json'] ?? '[]'), true) ?: [];
 		</tbody>
 	</table>
 	</div>
+	<?php else: ?><p>No backfill jobs yet.</p><?php endif ?>
 	<?php else: ?><p>Backfill service is not present yet.</p><?php endif ?>
-	<form method="post" action="<?= _url('extension', 'configure', 'e', urlencode($this->getName())) ?>"><input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" /><label>Scope <select name="backfill_scope"><?php foreach (['unread'=>'Unread','last_7_days'=>'Last 7 days','last_30_days'=>'Last 30 days','all'=>'All','feed'=>'Single feed','category'=>'Category','failed'=>'Failed only','taxonomy_changed'=>'Reclassify all after taxonomy change'] as $v=>$label): ?><option value="<?= $v ?>"><?= $label ?></option><?php endforeach ?></select></label> <label><input type="checkbox" name="backfill_dry_run" value="1" /> Dry run</label><label>Feed ID <input type="number" min="1" name="backfill_feed_id" /></label><label>Category ID <input type="number" min="1" name="backfill_category_id" /></label><button class="btn btn-important" name="admin_action" value="backfill">Queue backfill</button></form>
-	<form method="post" action="<?= _url('extension', 'configure', 'e', urlencode($this->getName())) ?>"><input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" /><button class="btn" name="admin_action" value="retry_failed">Retry failed backfill</button></form>
-</fieldset>
-<fieldset><legend>Preview</legend><p>Preview classifies supplied text without storing results or changing article state. Provider requests are bounded to 3 seconds.</p><form method="post" action="<?= _url('extension', 'configure', 'e', urlencode($this->getName())) ?>"><input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" /><input type="hidden" name="admin_action" value="preview" /><label>Title <input class="w100" name="preview_title" maxlength="5000" /></label><label>Body <textarea class="w100" name="preview_body" rows="6" maxlength="20000"></textarea></label><button class="btn" type="submit">Preview</button></form></fieldset>
+				<form method="post" action="<?= $actionUrl ?>">
+					<input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" />
+					<button class="btn" name="admin_action" value="retry_failed">Retry failed backfill</button>
+				</form>
+			</div>
+		</details>
+	</section>
+</div>

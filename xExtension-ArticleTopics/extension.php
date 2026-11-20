@@ -15,6 +15,9 @@ final class ArticleTopicsExtension extends Minz_Extension {
 	public string $error = '';
 	public string $notice = '';
 	public array $adminData = [];
+	public ?array $previewResult = null;
+	public array $activeProfileTopics = [];
+	public string $profileError = '';
 
 	public function init(): void {
 		if (!ArticleTopicsAccess::allows(Minz_User::name())) {
@@ -108,13 +111,16 @@ final class ArticleTopicsExtension extends Minz_Extension {
 		$this->adminData = $this->getConfigurationForAdmin();
 		$this->adminData['diagnostics'] = ArticleTopicsAdmin::diagnostics($this->getExtensionUserPath());
 		try {
+			$profile = ArticleTopicsClassifier::loadProfile();
+			if ($profile !== null) {
+				$this->activeProfileTopics = array_column(array_filter($profile['topics'], static fn(array $topic): bool => $topic['enabled']), 'name');
+				$this->activeProfileTopics[] = $profile['fallback'];
+			}
+		} catch (RuntimeException | InvalidArgumentException | JsonException $e) {
+			$this->profileError = $e->getMessage();
+		}
+		try {
 			if (!Minz_Request::isPost()) {
-				$profile = ArticleTopicsClassifier::loadProfile();
-				if ($profile !== null) {
-					$names = array_column(array_filter($profile['topics'], static fn(array $topic): bool => $topic['enabled']), 'name');
-					$names[] = $profile['fallback'];
-					$this->notice = 'Active keyword profile: ' . implode(', ', $names) . '. Edit keyword-profile.json to change these topics or their feed defaults. The topic table below is used when that file is absent.';
-				}
 				return;
 			}
 			$action = Minz_Request::paramString('admin_action', plaintext: true);
@@ -126,8 +132,7 @@ final class ArticleTopicsExtension extends Minz_Extension {
 			}
 			if ($action === 'health_check') { $this->notice = ArticleTopicsAdmin::healthCheck($this->getRuntimeConfiguration()); return; }
 			if ($action === 'preview') {
-				$preview = ArticleTopicsAdmin::preview($this->getRuntimeConfiguration(), Minz_Request::paramString('preview_title', plaintext: true), Minz_Request::paramString('preview_body', plaintext: true));
-				$this->notice = 'Preview: ' . json_encode($preview, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+				$this->previewResult = ArticleTopicsAdmin::preview($this->getRuntimeConfiguration(), Minz_Request::paramString('preview_title', plaintext: true), Minz_Request::paramString('preview_body', plaintext: true));
 				return;
 			}
 			if ($action === 'backfill' || $action === 'retry_failed') {
@@ -136,7 +141,7 @@ final class ArticleTopicsExtension extends Minz_Extension {
 				return;
 			}
 			$this->saveConfiguration();
-			$this->adminData = $this->getConfigurationForAdmin();
+			$this->adminData = $this->getConfigurationForAdmin() + ['diagnostics' => $this->adminData['diagnostics']];
 		} catch (Throwable $e) {
 			$this->error = $e->getMessage();
 		}

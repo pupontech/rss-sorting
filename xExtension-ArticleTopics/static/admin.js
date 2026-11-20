@@ -67,24 +67,38 @@
 		if (button.id === 'article-topics-load-models') {
 			void loadModels(button);
 		} else if (button.id === 'topic-add') {
-			const row = document.createElement('tr');
-			row.innerHTML = '<td><input class="topic-name"></td><td><input class="topic-enabled" type="checkbox" checked></td><td><input class="topic-description"></td><td><textarea class="topic-positive" rows="2"></textarea></td><td><textarea class="topic-negative" rows="2"></textarea></td><td><input class="topic-threshold" type="number" min="0" step="0.1" value="2"></td><td><button type="button" class="btn topic-delete">Delete</button></td>';
-			button.form.querySelector('#topic-rows').appendChild(row);
+			const template = button.form.querySelector('#article-topics-topic-template');
+			const topic = template.content.firstElementChild.cloneNode(true);
+			topic.open = true;
+			button.form.querySelector('#topic-rows').appendChild(topic);
+			topic.querySelector('.topic-name').focus();
 		} else if (button.classList.contains('topic-delete')) {
-			button.closest('tr').remove();
+			const topic = button.closest('.article-topics-topic');
+			const next = topic.nextElementSibling || topic.previousElementSibling;
+			const focusTarget = next?.querySelector('summary') || button.form.querySelector('#topic-add');
+			topic.remove();
+			focusTarget.focus();
 		}
 	});
 
 	document.addEventListener('change', event => {
 		const choices = event.target.closest('#article-topics-model-options select');
 		if (choices?.value) choices.form.elements.model.value = choices.value;
+		const scope = event.target.closest('.article-topics-settings [name="backfill_scope"]');
+		if (scope) {
+			for (const field of scope.form.querySelectorAll('[data-backfill-scope]')) {
+				field.querySelector('input').disabled = field.dataset.backfillScope !== scope.value;
+			}
+		}
 	});
 
 	document.addEventListener('input', event => {
 		const field = event.target.closest('#article-topics-form input');
 		if (!field) return;
 		const options = field.form.querySelector('#article-topics-model-options');
-		if (field.name === 'model') {
+		if (field.classList.contains('topic-name')) {
+			field.closest('.article-topics-topic').querySelector('summary').textContent = field.value.trim() || 'New topic';
+		} else if (field.name === 'model') {
 			const choices = options.querySelector('select');
 			choices.value = [...choices.options].some(option => option.value === field.value) ? field.value : '';
 		} else if (field.name === 'api_url' || field.name === 'api_key') {
@@ -93,11 +107,18 @@
 		}
 	});
 
+	document.addEventListener('invalid', event => {
+		if (event.target.form?.id !== 'article-topics-form') return;
+		for (let section = event.target.closest('details'); section; section = section.parentElement.closest('details')) {
+			section.open = true;
+		}
+	}, true);
+
 	document.addEventListener('submit', event => {
 		const form = event.target;
 		if (form.id !== 'article-topics-form' || event.submitter?.name === 'admin_action') return;
 
-		const topics = [...form.querySelectorAll('#topic-rows tr')].map(row => ({
+		const topics = [...form.querySelectorAll('#topic-rows .article-topics-topic')].map(row => ({
 			name: row.querySelector('.topic-name').value.trim(),
 			enabled: row.querySelector('.topic-enabled').checked,
 			description: row.querySelector('.topic-description').value,

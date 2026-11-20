@@ -1,0 +1,21 @@
+<?php declare(strict_types=1);
+$positive = $topic['positive_keywords'] ?? [];
+?>
+<details class="article-topics-topic" data-exclusions="<?= $h(json_encode($topic['exclusions'] ?? [])) ?>">
+	<summary><?= $h($name !== '' ? $name : 'New topic') ?></summary>
+	<div class="article-topics-stack">
+		<div class="article-topics-grid">
+			<label class="article-topics-field"><span>Name</span><input class="topic-name" value="<?= $h($name) ?>" /></label>
+			<label class="article-topics-field"><span>Keyword threshold</span><input class="topic-threshold" type="number" min="0" step="0.1" value="<?= $h($topic['threshold'] ?? 2) ?>" /></label>
+		</div>
+		<label class="article-topics-field"><span>Description</span><input class="topic-description" value="<?= $h($topic['description'] ?? '') ?>" /></label>
+		<div class="article-topics-grid">
+			<label class="article-topics-field"><span>Positive phrases</span><textarea class="topic-positive" rows="3"><?= $h(implode(', ', array_map(static fn($phrase, $weight): string => $phrase . ':' . $weight, array_keys($positive), array_values($positive)))) ?></textarea></label>
+			<label class="article-topics-field"><span>Negative phrases</span><textarea class="topic-negative" rows="3"><?= $h(implode(', ', $topic['negative_keywords'] ?? [])) ?></textarea></label>
+		</div>
+		<div class="article-topics-model-row">
+			<label class="article-topics-check"><input class="topic-enabled" type="checkbox" <?= ($topic['enabled'] ?? true) ? 'checked' : '' ?> /> Include in classification</label>
+			<button type="button" class="btn topic-delete">Remove topic</button>
+		</div>
+	</div>
+</details>

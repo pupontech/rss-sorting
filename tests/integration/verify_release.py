@@ -81,7 +81,11 @@ def settings_and_backfill(page, base, root, extension, php, env, fixtures, linke
     user = "--user=stagingowner"
     login(page, base, "stagingowner")
     open_settings(page, base)
-    rows = page.locator("#topic-rows tr")
+    expect(page.locator("#article-topics-form")).to_be_visible()
+    taxonomy = page.locator("#article-topics-taxonomy > summary")
+    if taxonomy.count():
+        taxonomy.click()
+    rows = page.locator("#topic-rows > :is(tr, .article-topics-topic)")
     expect(rows.first).to_be_visible()
     initial_count = rows.count()
     page.get_by_role("button", name="Add topic", exact=True).click()
@@ -209,6 +213,7 @@ def profile_upgrade(page, base, root, extension, php, env, release):
 
     page.goto(base + "?c=extension&a=configure&e=ArticleTopics")
     expect(page.get_by_text("Active keyword profile:", exact=False)).to_contain_text("Uncategorized")
+    page.locator("#article-topics-advanced > summary").click()
     page.locator('[name="worker_limit"]').fill("2")
     page.get_by_role("button", name="Save settings", exact=True).click()
     page.locator('[name="backfill_scope"]').select_option("unread")
@@ -318,7 +323,8 @@ def verify_new_arrivals_trial(page, base, root, extension, php, env, mock):
         page.goto(settings)
         expect(page.locator("#mode")).to_have_value("hybrid")
         expect(page.locator('[name="max_topics"]')).to_have_value("1")
-        expect(page.get_by_text("New-arrivals trial started", exact=False)).to_be_visible()
+        page.get_by_text("Activity details", exact=True).click()
+        expect(page.get_by_text("New-arrivals trial", exact=False)).to_be_visible()
 
         # Delayed feed commits can carry an ID lower than the activation high-water mark.
         delayed = min(state["processed_ids"]) - 1

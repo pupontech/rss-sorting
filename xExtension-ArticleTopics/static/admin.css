@@ -1,2 +1,7 @@
 #article-topics-form fieldset{min-width:0}#topic-scroll{overflow-x:auto;max-width:100%}#topic-scroll input:not([type=checkbox]),#topic-scroll textarea{box-sizing:border-box;width:100%;min-width:100px}
 .article-topics-table-scroll{overflow-x:auto;max-width:100%}
+.article-topics-model-row{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.article-topics-model-row input{flex:1 1 12rem;min-width:0}
+#article-topics-model-options:not([hidden]){display:block;margin-top:.5rem}
+#article-topics-model-options[hidden]{display:none}
+#article-topics-model-status:empty{display:none}

@@ -62,6 +62,47 @@ final class ArticleTopicsAdmin {
 		return 'Provider responded successfully.';
 	}
 
+	public static function providerBase(string $url): string {
+		$base = rtrim(trim($url), '/');
+		return preg_replace('#/chat/completions$#i', '', $base) ?? $base;
+	}
+
+	/** @return list<string> */
+	public static function modelIds(string $url, #[\SensitiveParameter] string $key, array $saved): array {
+		$base = self::providerBase($url);
+		$parts = parse_url($base);
+		if ($base === '' || !is_array($parts) || empty($parts['host'])
+			|| !in_array(strtolower((string)($parts['scheme'] ?? '')), ['http', 'https'], true)
+			|| isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) {
+			throw new InvalidArgumentException('Enter an HTTP or HTTPS provider base URL.');
+		}
+		// A saved credential belongs to the saved endpoint, even if the form edits the URL.
+		if ($key === '' && $base === self::providerBase((string)($saved['api_url'] ?? ''))) {
+			$key = (string)($saved['api_key'] ?? '');
+		}
+		$response = self::http($base . '/models', null, ['api_key' => $key], 3.0, 2_097_152);
+		if (in_array($response['status'], [401, 403], true)) {
+			throw new RuntimeException('The provider denied access to its model list. Check the API key or enter a model ID.');
+		}
+		if ($response['status'] < 200 || $response['status'] >= 300) {
+			throw new RuntimeException('The provider could not list models (HTTP ' . $response['status'] . '). Enter a model ID.');
+		}
+		$models = json_decode($response['body'], true)['data'] ?? null;
+		if (!is_array($models) || !array_is_list($models)) {
+			throw new RuntimeException('The provider returned an unsupported model list. Enter a model ID.');
+		}
+		$ids = [];
+		foreach ($models as $model) {
+			$id = $model['id'] ?? null;
+			if (is_string($id) && trim($id) !== '' && strlen($id) <= 200 && !preg_match('/[\x00-\x1f\x7f]/', $id)) {
+				$ids[] = $id;
+			}
+		}
+		$ids = array_values(array_unique($ids));
+		sort($ids, SORT_NATURAL | SORT_FLAG_CASE);
+		return $ids;
+	}
+
 	public static function preview(array $config, string $title, string $body): array {
 		$title = mb_substr($title, 0, 5000, 'UTF-8');
 		$body = mb_substr($body, 0, min(20000, max(500,(int)($config['content_limit'] ?? 5000))), 'UTF-8');
@@ -98,21 +139,24 @@ final class ArticleTopicsAdmin {
 	}
 
 	/** @return array{status:int,body:string} */
-	private static function http(string $url, array $payload, array $config, float $seconds): array {
-		$headers = ['Content-Type: application/json', 'Accept: application/json'];
+	private static function http(string $url, ?array $payload, array $config, float $seconds, int $maxBytes = 65536): array {
+		$headers = ['Accept: application/json'];
+		if ($payload !== null) { $headers[] = 'Content-Type: application/json'; }
 		if (trim((string)($config['api_key'] ?? '')) !== '') { $headers[] = 'Authorization: Bearer ' . $config['api_key']; }
 		$ch = curl_init($url);
 		if ($ch === false) { throw new RuntimeException('Could not initialize provider connection.'); }
-		curl_setopt_array($ch, [CURLOPT_POST=>true, CURLOPT_POSTFIELDS=>json_encode($payload, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR), CURLOPT_HTTPHEADER=>$headers, CURLOPT_RETURNTRANSFER=>true, CURLOPT_CONNECTTIMEOUT_MS=>min(3000,(int)($seconds*1000)), CURLOPT_TIMEOUT_MS=>min(3000,(int)($seconds*1000)), CURLOPT_FOLLOWLOCATION=>false, CURLOPT_MAXFILESIZE=>65536]);
+		curl_setopt_array($ch, [CURLOPT_HTTPHEADER=>$headers, CURLOPT_RETURNTRANSFER=>true, CURLOPT_CONNECTTIMEOUT_MS=>min(3000,(int)($seconds*1000)), CURLOPT_TIMEOUT_MS=>min(3000,(int)($seconds*1000)), CURLOPT_FOLLOWLOCATION=>false, CURLOPT_MAXFILESIZE=>$maxBytes]);
+		if ($payload !== null) {
+			curl_setopt_array($ch, [CURLOPT_POST=>true, CURLOPT_POSTFIELDS=>json_encode($payload, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR)]);
+		}
 		$body = curl_exec($ch); $status = (int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE); $ok = is_string($body); curl_close($ch);
 		if (!$ok) { throw new RuntimeException('Provider connection failed or exceeded the 3 second limit.'); }
 		return ['status'=>$status,'body'=>$body];
 	}
 
 	private static function endpoint(string $base): string {
-		$base = rtrim(trim($base), '/');
+		$base = self::providerBase($base);
 		if ($base === '') { throw new RuntimeException('Provider URL is not configured.'); }
-		if (preg_match('#/chat/completions$#i', $base)) { return $base; }
 		$parts = parse_url($base);
 		if (!is_array($parts) || !in_array(strtolower((string)($parts['scheme'] ?? '')), ['http','https'], true) || empty($parts['host'])) { throw new RuntimeException('Configured provider URL is invalid.'); }
 		return $base . '/chat/completions';

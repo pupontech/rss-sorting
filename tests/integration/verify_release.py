@@ -337,6 +337,52 @@ def verify_new_arrivals_trial(page, base, root, extension, php, env, mock):
     print("PASS reading notice, native tag removal, retry, and Hybrid trial scoped to new arrivals")
 
 
+def verify_model_picker(page, base, mock):
+    open_settings(page, base)
+    form = page.locator("#article-topics-form")
+    provider = form.locator("#api_url")
+    key = form.locator("#api_key")
+    model = form.locator("#model")
+    choices = form.get_by_role("combobox", name="Available models")
+    load = form.get_by_role("button", name="Load models")
+    status = form.locator("#article-topics-model-status")
+
+    provider.fill(mock + "/chat/completions/")
+    load.click()
+    expect(choices).to_be_visible()
+    assert choices.locator("option").all_text_contents() == ["Choose a model", "fixture-2", "fixture-10"]
+    choices.select_option("fixture-10")
+    expect(model).to_have_value("fixture-10")
+    form.get_by_role("button", name="Save settings", exact=True).click()
+    open_settings(page, base)
+    expect(model).to_have_value("fixture-10")
+
+    provider.fill(mock + "/protected")
+    expect(choices).to_be_hidden()
+    load.click()
+    expect(status).to_contain_text("denied access")
+    key.fill("replacement-token")
+    load.click()
+    expect(choices).to_be_visible()
+    expect(key).to_have_value("replacement-token")
+    key.fill("")
+    provider.fill(mock + "/anonymous")
+    load.click()
+    expect(choices).to_be_visible()
+    choices.select_option("public-model")
+    expect(model).to_have_value("public-model")
+
+    provider.fill(mock + "/unlisted")
+    load.click()
+    expect(status).to_contain_text("Enter a model ID.")
+    model.fill("manual-model")
+    form.get_by_role("button", name="Save settings", exact=True).click()
+    open_settings(page, base)
+    expect(model).to_have_value("manual-model")
+    expect(form.get_by_text("Leave blank for providers without authentication.")).to_be_visible()
+    print("PASS model discovery in the Extensions slider, saved and entered keys, provider isolation, and manual entry")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--freshrss", type=Path, required=True)
@@ -402,6 +448,7 @@ def main():
             if args.previous:
                 profile_upgrade(owner_page, base, root, extension, php, env, args.release)
                 verify_new_arrivals_trial(owner_page, base, root, extension, php, env, mock.rstrip("/"))
+                verify_model_picker(owner_page, base, mock.rstrip("/"))
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
   "name": "ArticleTopics",
   "author": "Community",
   "description": "Classify individual articles into user labels using weighted keywords and an OpenAI-compatible LLM.",
-  "version": "0.2.2-rc.2",
+  "version": "0.2.2-rc.3",
   "entrypoint": "ArticleTopics",
   "type": "user",
   "compatibility": "1.29.1"

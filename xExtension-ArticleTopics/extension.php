@@ -88,6 +88,22 @@ final class ArticleTopicsExtension extends Minz_Extension {
 		if (!ArticleTopicsAccess::allows(Minz_User::name())) {
 			return;
 		}
+		if (Minz_Request::isPost() && Minz_Request::paramBoolean('ajax')
+			&& Minz_Request::paramString('admin_action', plaintext: true) === 'list_models') {
+			header('Content-Type: application/json; charset=utf-8');
+			try {
+				$response = ['models' => ArticleTopicsAdmin::modelIds(
+					Minz_Request::paramString('api_url', plaintext: true),
+					trim(Minz_Request::paramString('api_key', plaintext: true)),
+					$this->getRuntimeConfiguration(),
+				)];
+			} catch (RuntimeException | InvalidArgumentException $error) {
+				$response = ['error' => $error->getMessage()];
+			}
+			// The generic configure view wraps even AJAX responses in the settings panel.
+			echo json_encode($response, JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
+			exit;
+		}
 		$this->registerAdminAssets();
 		$this->adminData = $this->getConfigurationForAdmin();
 		$this->adminData['diagnostics'] = ArticleTopicsAdmin::diagnostics($this->getExtensionUserPath());
@@ -137,8 +153,8 @@ final class ArticleTopicsExtension extends Minz_Extension {
 		$prefix = is_string($rawPrefix) ? $rawPrefix : '';
 		$prefix = trim($prefix) === '' ? 'Topic: ' : $prefix;
 		ArticleTopicsStore::assertNoCategoryCollisions($prefix, $taxonomy);
-		$url = trim(Minz_Request::paramString('api_url', plaintext: true));
-		$url = preg_replace('#/chat/completions/?$#i', '', $url) ?? $url;
+		$previousUrl = ArticleTopicsAdmin::providerBase((string)$this->getUserConfigurationValue('api_url', ''));
+		$url = ArticleTopicsAdmin::providerBase(Minz_Request::paramString('api_url', plaintext: true));
 		$parts = $url === '' ? [] : parse_url($url);
 		if ($url !== '' && (filter_var($url, FILTER_VALIDATE_URL) === false || !is_array($parts) || !in_array(strtolower((string)($parts['scheme'] ?? '')), ['http','https'], true))) { throw new InvalidArgumentException('Provider URL must be a valid HTTP or HTTPS URL.'); }
 		$model = trim(Minz_Request::paramString('model', plaintext: true));
@@ -172,7 +188,7 @@ final class ArticleTopicsExtension extends Minz_Extension {
 		try {
 			foreach ($values as $key=>$value) { $this->setUserConfigurationValue($key,$value); }
 			$key = trim(Minz_Request::paramString('api_key', plaintext: true));
-			if ($key !== '') { $this->setUserConfigurationValue('api_key',$key); }
+			if ($key !== '' || $url !== $previousUrl) { $this->setUserConfigurationValue('api_key', $key); }
 		} finally { flock($lock, LOCK_UN); fclose($lock); }
 		$this->notice = 'Configuration saved.';
 	}

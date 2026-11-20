@@ -25,8 +25,20 @@ $topics = json_decode((string)($cfg['taxonomy_json'] ?? '[]'), true) ?: [];
 	<details><summary>Advanced taxonomy JSON</summary><p>Current JSON is available for copying; the topic table is authoritative when saving.</p><pre><?= $h(json_encode($topics, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)) ?></pre></details></fieldset>
 	<div class="form-group"><label class="group-name" for="label_prefix">Label prefix</label><div class="group-controls"><input class="w100" id="label_prefix" name="label_prefix" value="<?= $h($cfg['label_prefix'] ?? 'Topic: ') ?>" /><p class="help">Names are checked against existing feed categories.</p></div></div>
 	<div class="form-group"><label class="group-name" for="api_url">Provider base URL</label><div class="group-controls"><input class="w100" type="url" id="api_url" name="api_url" value="<?= $h($cfg['api_url'] ?? '') ?>" placeholder="http://localhost:8080/v1" /></div></div>
-	<div class="form-group"><label class="group-name" for="model">Model</label><div class="group-controls"><input class="w100" id="model" name="model" value="<?= $h($cfg['model'] ?? '') ?>" /></div></div>
-	<div class="form-group"><label class="group-name" for="api_key">API key</label><div class="group-controls"><input class="w100" type="password" id="api_key" name="api_key" autocomplete="new-password" value="" /><p class="help"><?= !empty($cfg['api_key_configured']) ? 'A key is saved. Leave blank to preserve it.' : 'No key is saved. Leave blank for providers without authentication.' ?> The key is never shown.</p></div></div>
+	<div class="form-group">
+		<label class="group-name" for="model">Model</label>
+		<div class="group-controls">
+			<div class="article-topics-model-row">
+				<input class="w100" id="model" name="model" value="<?= $h($cfg['model'] ?? '') ?>" />
+				<button type="button" class="btn" id="article-topics-load-models">Load models</button>
+			</div>
+			<label id="article-topics-model-options" hidden>Available models
+				<select class="w100" aria-label="Available models"></select>
+			</label>
+			<p class="help" id="article-topics-model-status" role="status"></p>
+		</div>
+	</div>
+	<div class="form-group"><label class="group-name" for="api_key">API key</label><div class="group-controls"><input class="w100" type="password" id="api_key" name="api_key" autocomplete="new-password" value="" /><p class="help"><?= !empty($cfg['api_key_configured']) ? 'A key is saved for this provider. Enter a new key if you switch providers.' : 'Leave blank for providers without authentication.' ?></p></div></div>
 	<div class="form-group"><label class="group-name">Provider health</label><div class="group-controls"><button class="btn" name="admin_action" value="health_check">Check provider</button><p class="help">Sends a short request only to the configured endpoint; timeout is 3 seconds.</p></div></div>
 	<div class="form-group"><label class="group-name" for="mode">Classification</label><div class="group-controls"><select id="mode" name="mode"><?php foreach (['keywords'=>'Keywords Only','hybrid'=>'Hybrid','llm'=>'AI Only'] as $v=>$label): ?><option value="<?= $v ?>" <?= ($cfg['mode'] ?? 'hybrid') === $v ? 'selected' : '' ?>><?= $label ?></option><?php endforeach ?></select> Max topics <input type="number" min="1" max="20" name="max_topics" value="<?= $h($cfg['max_topics'] ?? 1) ?>" /> Confidence threshold <input type="number" min="0" max="1" step="0.01" name="confidence_threshold" value="<?= $h($cfg['confidence_threshold'] ?? 0) ?>" /></div></div>
 	<div class="form-group"><label class="group-name">Worker</label><div class="group-controls">Articles per run <input type="number" min="1" max="500" name="worker_limit" value="<?= $h($cfg['worker_limit'] ?? 50) ?>" /> Seconds per run <input type="number" min="1" max="300" name="worker_seconds" value="<?= $h($cfg['worker_seconds'] ?? 20) ?>" /> Max attempts <input type="number" min="1" max="5" name="max_attempts" value="<?= $h($cfg['max_attempts'] ?? 5) ?>" /> Retry base seconds <input type="number" min="1" name="retry_base_seconds" value="<?= $h($cfg['retry_base_seconds'] ?? 60) ?>" /></div></div>

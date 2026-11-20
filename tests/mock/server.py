@@ -46,6 +46,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             return self.respond(200, "ok", "text/plain")
+        if self.path in ("/models", "/protected/models", "/anonymous/models"):
+            expected = {"/models": "Bearer fixture-token", "/protected/models": "Bearer replacement-token",
+                        "/anonymous/models": None}[self.path]
+            if self.headers.get("Authorization") != expected:
+                return self.respond(401, "{}")
+            ids = ["public-model"] if expected is None else ["fixture-10", "fixture-2", "fixture-2"]
+            return self.respond(200, json.dumps({"data": [{"id": id_} for id_ in ids]}))
         if self.path in ("/feed.xml", "/general-tech.xml"):
             channel = ET.Element("channel")
             ET.SubElement(channel, "title").text = "General Tech Daily"

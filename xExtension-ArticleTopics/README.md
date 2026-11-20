@@ -1,4 +1,4 @@
-# Article Topics 0.2.2-rc.2
+# Article Topics 0.2.2-rc.3
 
 Copy this directory into `extensions/` on FreshRSS 1.29.1 or later. Enable ArticleTopics for the FreshRSS user, then open its gear in Configuration → Extensions. The PHP/web account needs write access to `data/users/<user>/extensions/ArticleTopics/` and the user database.
 
@@ -15,6 +15,8 @@ On a shared install, an administrator can limit Article Topics to selected accou
 The list applies to the settings, preview, job queue, and both CLI entry points. Omit `allowed_users` to use FreshRSS's regular per-user configuration. An empty list disables Article Topics for every account. Keep each scheduled job's `--user` set to the intended FreshRSS account.
 
 Keywords Only runs locally; Hybrid uses weighted phrases first and calls the configured OpenAI-compatible endpoint for weak/conflicting/absent results. LLM Only always calls it. Requests contain configured topic names/descriptions and bounded article title/content/feed tags. Article URLs are never fetched. API keys are stored in FreshRSS per-user configuration and never shown in the form.
+
+Enter the provider base URL and choose **Load models** beside the Model field to fetch its model list. Select a model and save the settings, or enter its ID directly. Use **Check provider** after saving to test the model with the Chat Completions endpoint.
 
 Topic: is the default label prefix (with a trailing space). User labels and feed categories share an API namespace; collisions are rejected. Labels do not move articles or change read/star states. Only extension-owned label associations are removed during reclassification or expiration; prior manual pairs remain manual.
 

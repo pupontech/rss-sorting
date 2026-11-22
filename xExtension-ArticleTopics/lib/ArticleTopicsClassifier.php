@@ -150,8 +150,17 @@ final class ArticleTopicsClassifier {
 			if (!$negative && $headlineScore >= $topic['threshold']) { $headlineNames[] = $topic['name']; }
 		}
 		$keywordConflict = $this->hasConflict(array_keys($keywordNames), $topics);
-		$ambiguous = $this->singleTopic() && count($keywordNames) > 1;
-		$needsLlm = $mode === 'llm' || ($mode === 'hybrid' && (count($keywordNames) === 0 || $keywordConflict || $weak || $ambiguous));
+		$ambiguous = false;
+		if ($this->singleTopic() && count($keywordNames) > 1) {
+			$matchedScores = array_intersect_key($scores, $keywordNames);
+			arsort($matchedScores, SORT_NUMERIC);
+			$topTwo = array_values($matchedScores);
+			$soleHeadline = count($headlineNames) === 1;
+			$clearLead = ($topTwo[0] ?? 0) >= 2 * ($topTwo[1] ?? 0);
+			$ambiguous = !$soleHeadline && !$clearLead;
+		}
+		$weakOnly = $weak && (!$this->singleTopic() || count($keywordNames) === 0);
+		$needsLlm = $mode === 'llm' || ($mode === 'hybrid' && (count($keywordNames) === 0 || $keywordConflict || $weakOnly || $ambiguous));
 		$llmCalls = 0; $confidence = [];
 		if ($mode !== 'llm' && !$needsLlm) {
 			$names = $this->profile === null

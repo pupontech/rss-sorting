@@ -62,12 +62,18 @@ try {
 	$ranked=(new ArticleTopicsClassifier(['mode'=>'llm','max_topics'=>1,'api_url'=>'http://127.0.0.1:'.$port]))->classify(['title'=>'x','body'=>'','tags'=>[]],$taxonomy,microtime(true)+5);
 	assertSameValue(['Finance'],$ranked['names'],'LLM top-N follows confidence rather than taxonomy order');
 
-	$taxonomy[0]['positive_keywords'] = ['zelda' => 3];
-	$taxonomy[1]['positive_keywords'] = ['finance' => 3];
+	$taxonomy[0]['positive_keywords'] = ['zelda' => 3, 'nintendo' => 3];
+	$taxonomy[1]['positive_keywords'] = ['finance' => 3, 'bond' => 1];
 	$primary = new ArticleTopicsClassifier(['mode'=>'hybrid', 'max_topics'=>1, 'api_url'=>'http://127.0.0.1:'.$port]);
 	$clear = $primary->classify(['title'=>'Zelda release', 'body'=>'', 'tags'=>[]], $taxonomy, microtime(true)+5);
 	assertSameValue(['Video Games'], $clear['names'], 'clear one-topic match remains local');
 	assertSameValue(0, $clear['llm_calls']);
+	$weakOther = $primary->classify(['title'=>'Zelda release', 'body'=>'A passing bond mention', 'tags'=>[]], $taxonomy, microtime(true)+5);
+	assertSameValue(['Video Games'], $weakOther['names'], 'weak sub-threshold mention in another topic does not force an LLM call');
+	assertSameValue(0, $weakOther['llm_calls']);
+	$dominant = $primary->classify(['title'=>'Zelda and Nintendo showcase', 'body'=>'Includes a finance note', 'tags'=>[]], $taxonomy, microtime(true)+5);
+	assertSameValue(['Video Games'], $dominant['names'], 'clear score lead settles single-topic overlap locally');
+	assertSameValue(0, $dominant['llm_calls']);
 	$overlap = $primary->classify(['title'=>'Zelda and finance', 'body'=>'', 'tags'=>[]], $taxonomy, microtime(true)+5);
 	assertSameValue(['Finance'], $overlap['names'], 'provider settles the overlap without a second label');
 	assertSameValue(1, $overlap['llm_calls']);

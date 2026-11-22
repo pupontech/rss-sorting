@@ -1,55 +1,117 @@
 # Article Topics for FreshRSS
 
-Article Topics **0.2.0** classifies individual articles into FreshRSS user labels, independently of their feed. Target: **FreshRSS 1.30.4**. Articles stay in their original feed and All Articles; classification does not change read or starred state. Architecture: [ADR-001](docs/adr-001.md).
+Automatically sort individual FreshRSS articles into topic labels (`Topic: AI`, `Topic: Gaming`, `Topic: Security & Privacy`, etc.) using fast local keywords first and an optional AI fallback when keywords aren't sure.
 
-## Install and configure
+## Why I created this
 
-Copy `xExtension-ArticleTopics` into your FreshRSS `extensions/` directory. For Docker/Compose, mount it read-only at `/var/www/FreshRSS/extensions/xExtension-ArticleTopics` and preserve the FreshRSS data volume. On bare metal, use the equivalent install directory. The PHP/web account needs read access to code and write access to the user's database and `data/users/<user>/extensions/ArticleTopics/`.
+FreshRSS lets you organize *feeds* into folders, which works great when a feed only writes about one thing. In practice, a lot of the best feeds don't work like that — personal blogs, indie-web aggregators, and newsletters jump between software, hardware, books, photography, and everyday life in the same stream.
 
-Enable **ArticleTopics** in FreshRSS extensions, open its configuration page, and select Keywords Only, Hybrid, or LLM Only. Configure an OpenAI-compatible base URL (without `/chat/completions`), model and optional key for Hybrid/LLM modes. Keys are stored in FreshRSS per-user configuration; a blank submitted key preserves the saved key. Health checks send a bounded explicit request to that endpoint. Never put keys in shared logs.
+I wanted to browse my reading list **by what an article is actually about**, without:
+- moving articles out of their original feeds or losing read/starred status,
+- manually tagging dozens of posts a day, or
+- paying to send every single article to an LLM when simple keywords can already tell what it's about.
 
-Edit topic names, descriptions, weighted phrases, negative phrases, thresholds and enabled state in the native UI. Add/delete rows as needed; existing exclusion rules are preserved. The advanced JSON view exposes the full taxonomy. Unknown model topics are dropped; malformed or partial results fail rather than clearing labels. Preview shows method, confidence and matched phrases without writing article labels or worker state.
+Article Topics solves this by adding FreshRSS user labels (prefixed with `Topic: `) to each article in the background. If you remove an automatic label, Article Topics respects your choice and won't re-add it.
 
-**Content sent to the LLM:** configured topic names/descriptions and bounded article title, HTML-cleaned content/summary and feed-supplied tags. The endpoint receives this content under its own privacy terms. The extension never fetches article URLs or follows provider redirects. Keywords Only needs no provider. Hybrid avoids requests for clear keyword results and calls the provider for weak, conflicting or absent matches. Optional reasoning/think fields are removed only after an explicit provider rejection.
+## How it works
 
-## Labels, retention, and privacy
+You pick one of three modes:
+- **Keywords Only** — 100% local, free, and private. Scores articles against your weighted keyword rules.
+- **Hybrid (recommended)** — Runs keywords locally first. Only calls your AI provider when no topic matches, two topics tie, or rules conflict.
+- **AI Only** — Always asks your configured OpenAI-compatible provider (OpenAI, OpenRouter, Ollama, LM Studio, etc.) to pick the topic.
 
-Default label prefix: `Topic: ` (including the space). Feed categories and user labels share the Google Reader API namespace, so full-name collisions are rejected. These are user labels, not article tags or feed categories. An article can have multiple topics. Existing manual article-label pairs are not claimed; reclassification and expiration remove only recorded extension-owned pairs. Ownership and association changes share a user-database transaction.
+Your articles stay in their original feeds, read/starred states are never touched, and manual labels you add yourself are never removed.
 
-FreshRSS `keep_labels=true` protects labelled entries from purge. Owned-label expiration defaults to the user's `archiving.keep_period`; if unset, it uses three months. Configure explicit retention days or disable expiration in the UI. Expired entries are not labelled again; manual/unrelated labels remain untouched and may still protect entries. Disabling/removing the extension does not delete labels or user data. Protect FreshRSS data/configuration and backups as credentials and reading-history data.
+---
 
-## Scheduling and backfill
+## What you need to do to use this plugin
 
-Run both jobs separately from refresh and reader sync, under the same PHP/user permissions as FreshRSS:
+### 1. Install the extension
 
+Download the latest release ZIP from [Releases](https://github.com/pupontech/rss-sorting/releases) (or copy `xExtension-ArticleTopics/` from this repo) into your FreshRSS `extensions/` directory:
+
+- **Standard / bare-metal FreshRSS**: copy `xExtension-ArticleTopics` into `/var/www/FreshRSS/extensions/`.
+- **LinuxServer Docker (`lscr.io/linuxserver/freshrss`)**: copy `xExtension-ArticleTopics` into `/config/www/freshrss/extensions/`.
+
+Make sure the FreshRSS PHP user (`www-data` or `abc` in LinuxServer Docker) can read the extension files and write to `data/users/<your-user>/extensions/ArticleTopics/` and your user SQLite/DB.
+
+*(Optional — shared installs)* If multiple people share one FreshRSS server and you only want specific accounts to use Article Topics, add an allowlist to FreshRSS's system `data/config.php`:
+
+```php
+'extensions' => [
+    'ArticleTopics' => [
+        'allowed_users' => ['alice'],
+    ],
+],
+```
+
+### 2. Enable and configure it in FreshRSS
+
+1. Sign in to FreshRSS, open **Configuration (gear icon) → Extensions**.
+2. Enable **ArticleTopics**, then click the **gear icon** next to it to open the settings panel.
+3. Turn on **Enable automatic topic labels** and pick your mode (**Hybrid**, **Keywords Only**, or **AI Only**).
+4. If using **Hybrid** or **AI Only**:
+   - Enter your **Provider base URL** (for example `https://api.openai.com/v1` or your local Ollama URL, without `/chat/completions`).
+   - Enter your **API key** (leave blank for local providers without auth). Keys are stored per user and never displayed back in the form.
+   - Click **Load models** to pick a model from your provider, or type a model ID manually.
+5. Click **Save settings**, then click **Check provider** to confirm the connection works right inside the panel.
+6. *(Optional)* Use **Test a classification** at the bottom of the panel to test sample text without touching any real articles.
+
+### 3. Schedule the background workers
+
+Article Topics runs outside FreshRSS's web requests so a slow AI provider never blocks feed refreshes or page loads. Add two cron jobs under the same user that runs FreshRSS (replace `alice` with your FreshRSS username):
+
+**Bare metal / standard Docker:**
 ```cron
-*/5 * * * * cd /var/www/FreshRSS && php extensions/xExtension-ArticleTopics/cli/classify.php --user=alice
-*/5 * * * * cd /var/www/FreshRSS && php extensions/xExtension-ArticleTopics/cli/backfill.php --user=alice --next
+2-59/5 * * * * cd /var/www/FreshRSS && php extensions/xExtension-ArticleTopics/cli/classify.php --user=alice
+3-59/5 * * * * cd /var/www/FreshRSS && php extensions/xExtension-ArticleTopics/cli/backfill.php --user=alice --next
 ```
 
-Docker example: `docker exec --user www-data freshrss php extensions/xExtension-ArticleTopics/cli/classify.php --user=alice`. Schedule the corresponding `backfill.php --user=alice --next` command too. Saved worker budgets default to 20 seconds/50 articles; `classify.php --limit=N` overrides its article budget. Bounded HTTP timeouts, exponential retries (default five attempts), and a nonblocking per-user lock keep outages and overlap independent of refresh. Deleted entries are skipped and their failures cleaned. Committed input changes are detected through bounded fingerprint scans.
+**LinuxServer Docker (`abc` crontab inside the container):**
+```cron
+2-59/5 * * * * ARTICLETOPICS_FRESHRSS_ROOT=/app/www /usr/bin/php /app/www/extensions/xExtension-ArticleTopics/cli/classify.php --user=alice
+3-59/5 * * * * ARTICLETOPICS_FRESHRSS_ROOT=/app/www /usr/bin/php /app/www/extensions/xExtension-ArticleTopics/cli/backfill.php --user=alice --next
+```
 
-Enabling snapshots visible IDs as already handled; live discovery catches later commits, including lower IDs. It does not classify existing articles automatically. Queue a backfill in the UI or create/run one with:
+- `classify.php` runs every 5 minutes (2 minutes past the mark) to label newly arrived articles. When nothing is new, it exits cleanly without rewriting state.
+- `backfill.php --next` runs every 5 minutes to process any backfill jobs you queue in the UI.
 
+### 4. Label older articles (optional)
+
+Enabling Article Topics only classifies **new** articles going forward so it doesn't unexpectedly burn API credits on your entire archive. Whenever you want to label older articles:
+
+1. Open **Extensions → ArticleTopics (gear)** and scroll to **Backfill existing articles**.
+2. Pick a scope (`Unread`, `Last 7 days`, `Last 30 days`, `Single feed`, `All`, etc.).
+3. Check **Dry run** first if you want to see how many articles would be labeled without making changes, then click **Queue backfill**.
+
+Or run it directly from the CLI:
 ```sh
-php extensions/xExtension-ArticleTopics/cli/backfill.php --user=alice --scope=all --dry-run --limit=50
-php extensions/xExtension-ArticleTopics/cli/backfill.php --user=alice --job=JOB_ID --limit=50
+php extensions/xExtension-ArticleTopics/cli/backfill.php --user=alice --scope=unread --dry-run --limit=50
 ```
 
-Scopes: `unread`, `7d`, `30d`, `all`, `feed` with `--feed-id`, `category` with `--category-id`, `failed`, and `taxonomy` (explicitly reclassify everything after a taxonomy change). Jobs retain a keyset cursor and creation-time upper ID bound. Dry runs predict topics without changing labels or live worker state; they can still call the configured provider. Progress includes scanned/labelled/skipped/failed/articles and actual LLM requests, including failures. Diagnostics show counts, method share and recent failures with a retry action. A job at its retry cap finishes with failure records; inspect those before treating a job as fully successful.
+---
 
-## Validation and FeedMe
+## Customizing topics & reducing AI calls
 
-Run `composer install` and `composer check` with PHP 8.3, cURL, mbstring and SQLite. Production PHPStan runs at level 5 against FreshRSS 1.30.4; the API contract additionally runs at level 10. Upstream has separate first-party level 10 and third-party level 0 configs; our stronger third-party level 5 choice is explicit, not a claim of full level 10 implementation coverage.
+- **In the UI**: Expand **Topics** in the Article Topics settings panel to add/edit topics, weighted positive phrases (`phrase:2`), negative phrases, and thresholds.
+- **With a per-user profile file**: Place a `keyword-profile.json` file in `data/users/<user>/extensions/ArticleTopics/` (see [xExtension-ArticleTopics/profiles/one-topic.json](xExtension-ArticleTopics/profiles/one-topic.json) for a ready-to-use 10-topic starter). When a profile is active, title and feed-tag matches get 2× weight, and you can also map specific feeds to default topics.
+- **Tips to keep AI calls low in Hybrid mode**:
+  - Give unmistakable topic-defining terms a weight of `2` (matching your threshold of `2`) so they resolve locally on the first hit.
+  - Keep general supporting terms at weight `1` so two of them together (or one in the title) resolve locally.
+  - In single-topic mode (`Max topics = 1`), clear winners and dominant headline matches stay local; only genuine ties or unmatched articles go to the AI.
 
-Local SQLite validation: `tests/integration/run.ps1 -Mode Assertions` against the installed ignored development checkout; setup and prerequisites are in [the integration guide](tests/integration/README.md). Docker fixtures and CI are provided in `docker-compose.test.yml` and `.github/workflows/ci.yml`. Build a versioned ZIP with `php scripts/build-release.php` (requires PHP zip). No benchmark or real-feed quality number is inferred from mocks.
+## Privacy, labels & retention
 
-The Google Reader API verifier checks label `type: tag`, topic/feed membership, unread count, and read/star persistence/restoration. FeedMe issue [#275](https://github.com/seazon/FeedMe/issues/275) was open when checked on 2026-11-19. API checks do not establish Android rendering or sync compatibility. Run [the phone checklist](docs/feedme-manual-test.md); no workaround is claimed. About 50 user-labelled real articles are still needed for per-topic precision and recall.
+- **What gets sent to the AI**: Only when an article actually escalates to the provider in Hybrid/AI Only mode, Article Topics sends your topic names/descriptions and the article's title, plain-text content (capped by your content limit), and feed tags. It never fetches article URLs or follows redirects.
+- **Label prefix**: Defaults to `Topic: ` (with a space). FreshRSS and the Google Reader API share a namespace between feed categories and user labels, so collisions with existing category names are blocked automatically.
+- **Retention**: FreshRSS's `keep_labels` setting keeps labeled articles from being purged. To avoid infinite database growth, Article Topics automatically expires its own labels after FreshRSS's `archiving.keep_period` (or 3 months if unset). You can adjust or disable this under **Advanced settings → Retention**. Manual labels are never touched.
+- **Uninstalling**: Disable the extension and remove `xExtension-ArticleTopics/`. Your existing labels and articles stay intact.
 
-## Update, troubleshoot, uninstall
+## Development & verification
 
-Back up FreshRSS data before replacing extension files. Preserve per-user state; schema 1 file state migrates to schema 2. Review custom taxonomies after upgrading: legacy entries receive empty keyword/exclusion defaults. Check PHP/FreshRSS logs, endpoint URL/model, permissions, cron and recent failures when processing stops. Do not share secrets or article bodies in diagnostics.
+- Run unit tests and PHP linting: `php scripts/lint.php && php tests/run.php`
+- Run static analysis: `phpstan analyse -c phpstan.neon` and `phpstan analyse -c phpstan-contract.neon`
+- Build a release ZIP: `php scripts/build-release.php`
+- Full FreshRSS integration + Playwright test: see [tests/integration/README.md](tests/integration/README.md)
 
-To uninstall, disable the extension and remove its code directory. Applied labels, ownership tables and state remain. Explicit data removal is a separate administrative operation; never delete ownership state casually while its labels remain. Nothing here deploys to a live FreshRSS instance.
-
-See [release notes](docs/release-notes.md), [security review](docs/security-review.md), [review ledger](docs/review-ledger.md), and [changelog](CHANGELOG.md).
+More technical details: [Architecture (ADR-001)](docs/adr-001.md), [Security Review](docs/security-review.md), [FeedMe Checklist](docs/feedme-manual-test.md), and [Changelog](CHANGELOG.md).

@@ -1,4 +1,7 @@
 (() => {
+	if (window.__articleTopicsAdminBound) return;
+	window.__articleTopicsAdminBound = true;
+
 	const parsePhrases = (text, weighted) => {
 		const phrases = text.split(',').map(phrase => phrase.trim()).filter(Boolean);
 		if (!weighted) return phrases;
@@ -12,6 +15,7 @@
 	};
 
 	async function loadModels(button) {
+		if (button.disabled) return;
 		const form = button.form;
 		const provider = form.elements.api_url;
 		const key = form.elements.api_key;
@@ -54,6 +58,28 @@
 			status.textContent = 'Choose a model, then save settings.';
 		} catch {
 			if (stillCurrent()) status.textContent = 'Could not load models. Try again or enter a model ID.';
+		} finally {
+			button.disabled = false;
+		}
+	}
+
+	async function checkProvider(form, button) {
+		if (button.disabled) return;
+		const status = form.closest('.article-topics-settings').querySelector('#article-topics-provider-status');
+		status.textContent = 'Checking the saved provider…';
+		button.disabled = true;
+		try {
+			const endpoint = new URL(form.action);
+			endpoint.searchParams.set('ajax', '1');
+			const response = await fetch(endpoint, {
+				method: 'POST',
+				body: new URLSearchParams(new FormData(form)),
+			});
+			if (!response.ok) throw new Error();
+			const result = await response.json();
+			status.textContent = result.error || result.message || 'Could not check the provider.';
+		} catch {
+			status.textContent = 'Could not check the provider. Try again.';
 		} finally {
 			button.disabled = false;
 		}
@@ -116,6 +142,11 @@
 
 	document.addEventListener('submit', event => {
 		const form = event.target;
+		if (form.id === 'article-topics-provider-check' && event.submitter) {
+			event.preventDefault();
+			void checkProvider(form, event.submitter);
+			return;
+		}
 		if (form.id !== 'article-topics-form' || event.submitter?.name === 'admin_action') return;
 
 		const topics = [...form.querySelectorAll('#topic-rows .article-topics-topic')].map(row => ({

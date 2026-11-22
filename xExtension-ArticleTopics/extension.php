@@ -91,15 +91,18 @@ final class ArticleTopicsExtension extends Minz_Extension {
 		if (!ArticleTopicsAccess::allows(Minz_User::name())) {
 			return;
 		}
-		if (Minz_Request::isPost() && Minz_Request::paramBoolean('ajax')
-			&& Minz_Request::paramString('admin_action', plaintext: true) === 'list_models') {
+		$action = Minz_Request::isPost() ? Minz_Request::paramString('admin_action', plaintext: true) : '';
+		if (Minz_Request::paramBoolean('ajax') && in_array($action, ['list_models', 'health_check'], true)) {
 			header('Content-Type: application/json; charset=utf-8');
 			try {
-				$response = ['models' => ArticleTopicsAdmin::modelIds(
-					Minz_Request::paramString('api_url', plaintext: true),
-					trim(Minz_Request::paramString('api_key', plaintext: true)),
-					$this->getRuntimeConfiguration(),
-				)];
+				$config = $this->getRuntimeConfiguration();
+				$response = $action === 'health_check'
+					? ['message' => ArticleTopicsAdmin::healthCheck($config)]
+					: ['models' => ArticleTopicsAdmin::modelIds(
+						Minz_Request::paramString('api_url', plaintext: true),
+						trim(Minz_Request::paramString('api_key', plaintext: true)),
+						$config,
+					)];
 			} catch (RuntimeException | InvalidArgumentException $error) {
 				$response = ['error' => $error->getMessage()];
 			}
@@ -107,7 +110,6 @@ final class ArticleTopicsExtension extends Minz_Extension {
 			echo json_encode($response, JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
 			exit;
 		}
-		$this->registerAdminAssets();
 		$this->adminData = $this->getConfigurationForAdmin();
 		$this->adminData['diagnostics'] = ArticleTopicsAdmin::diagnostics($this->getExtensionUserPath());
 		try {
@@ -123,7 +125,6 @@ final class ArticleTopicsExtension extends Minz_Extension {
 			if (!Minz_Request::isPost()) {
 				return;
 			}
-			$action = Minz_Request::paramString('admin_action', plaintext: true);
 			if ($action === 'retry_live') {
 				$count = ArticleTopicsStore::retryLiveFailures($this->getExtensionUserPath());
 				$this->notice = sprintf('Queued %d article(s) for the next classifier run.', $count);

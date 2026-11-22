@@ -121,23 +121,27 @@ final class ArticleTopicsClassifier {
 		$topics = $this->normalizeTaxonomy($this->profile['topics'] ?? $taxonomy);
 		$feedId = is_int($inputs['feed_id'] ?? null) ? $inputs['feed_id'] : 0;
 		$inputs = $this->normalizeInputs($inputs);
-		$shortInputs = ['title' => $inputs['title'], 'body' => '', 'tags' => $inputs['tags']];
-		$bodyInput = ['title' => '', 'body' => $inputs['body'], 'tags' => []];
+		$foldedTitle = $this->fold($inputs['title']);
+		$foldedBody = $this->fold($inputs['body']);
+		$foldedTags = $this->fold(implode(' ', $inputs['tags']));
+		$foldedAll = [$foldedTitle, $foldedBody, $foldedTags];
+		$foldedShort = [$foldedTitle, $foldedTags];
+		$foldedBodyOnly = [$foldedBody];
 		$scores = []; $matched = []; $keywordNames = []; $headlineNames = []; $weak = false;
 		foreach ($topics as $i => $topic) {
 			$hits = []; $headlineScore = 0;
 			foreach ($topic['positive_keywords'] as $phrase => $weight) {
 				if ($this->profile === null) {
-					if ($this->hasPhrase($inputs, $phrase)) { $hits[$phrase] = $weight; }
-				} elseif ($this->hasPhrase($shortInputs, $phrase)) {
+					if ($this->hasPhrase($foldedAll, $phrase)) { $hits[$phrase] = $weight; }
+				} elseif ($this->hasPhrase($foldedShort, $phrase)) {
 					$hits[$phrase] = 2 * $weight;
 					$headlineScore += $hits[$phrase];
-				} elseif ($this->hasPhrase($bodyInput, $phrase)) {
+				} elseif ($this->hasPhrase($foldedBodyOnly, $phrase)) {
 					$hits[$phrase] = $weight;
 				}
 			}
 			$negative = false;
-			foreach ($topic['negative_keywords'] as $phrase) { if ($this->hasPhrase($inputs, $phrase)) { $negative = true; break; } }
+			foreach ($topic['negative_keywords'] as $phrase) { if ($this->hasPhrase($foldedAll, $phrase)) { $negative = true; break; } }
 			$score = array_sum($hits);
 			if (!$negative && $score > 0 && $score < $topic['threshold']) { $weak = true; }
 			$scores[$topic['name']] = $score;
@@ -238,12 +242,13 @@ final class ArticleTopicsClassifier {
 		return ['title' => $title, 'body' => $body, 'tags' => $tags];
 	}
 
-	private function hasPhrase(array $inputs, string $phrase): bool {
+	/** @param list<string> $foldedTexts */
+	private function hasPhrase(array $foldedTexts, string $phrase): bool {
 		$phrase = $this->fold($phrase);
 		if ($phrase === '') { return false; }
 		$pattern = '/(?<![\p{L}\p{N}_])' . preg_quote($phrase, '/') . '(?![\p{L}\p{N}_])/u';
-		foreach ([$inputs['title'], $inputs['body'], implode(' ', $inputs['tags'])] as $text) {
-			if (preg_match($pattern, $this->fold($text)) === 1) { return true; }
+		foreach ($foldedTexts as $text) {
+			if ($text !== '' && preg_match($pattern, $text) === 1) { return true; }
 		}
 		return false;
 	}

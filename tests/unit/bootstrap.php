@@ -19,8 +19,9 @@ final class FreshRSS_DatabaseDAO { public const LENGTH_INDEX_UNICODE = 180; }
 final class FreshRSS_CategoryDAO {}
 final class TestEntryDao {
 	public array $entries = [];
+	public array $searchedIds = [];
 	public function listIdsWhere(string $alias, int $state, ?string $id_min = null, string $order = 'ASC', ?int $limit = null, int $offset = 0): array { $ids = array_keys($this->entries); $ids = array_values(array_filter($ids, static fn($id) => $id_min === null || (int)$id >= (int)$id_min)); sort($ids, SORT_NUMERIC); if ($order === 'DESC') $ids = array_reverse($ids); return array_slice($ids, $offset, $limit); }
-	public function searchById(string $id): ?FreshRSS_Entry { return $this->entries[$id] ?? null; }
+	public function searchById(string $id): ?FreshRSS_Entry { $this->searchedIds[] = $id; return $this->entries[$id] ?? null; }
 }
 final class FreshRSS_Factory { public static TestCategoryDao $categoryDao; public static TestEntryDao $entryDao; public static function createCategoryDao(): TestCategoryDao { return self::$categoryDao; } public static function createEntryDao(): TestEntryDao { return self::$entryDao; } }
 class TestPDO extends PDO { public function dbType(): string { return 'sqlite'; } }

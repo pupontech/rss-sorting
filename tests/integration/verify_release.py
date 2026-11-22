@@ -363,7 +363,22 @@ def verify_model_picker(page, base, mock):
     open_settings(page, base)
     expect(model).to_have_value("fixture-10")
 
+    check = form.get_by_role("button", name="Check provider", exact=True)
+    check_status = form.locator("#article-topics-provider-status")
+    provider.fill(mock + "/unsaved")
+    key.fill("unsaved-key")
+    check.click()
+    expect(check_status).to_have_text("Provider responded successfully.")
+    expect(provider).to_have_value(mock + "/unsaved")
+    expect(key).to_have_value("unsaved-key")
+    response = page.request.post(mock + "/__test__/responses", data={"responses": [503]})
+    assert response.ok
+    check.click()
+    expect(check_status).to_have_text("LLM provider request failed (HTTP 503).")
+    print("PASS provider check uses saved settings and shows success and failure inline")
+
     provider.fill(mock + "/protected")
+    key.fill("")
     expect(choices).to_be_hidden()
     load.click()
     expect(status).to_contain_text("denied access")
@@ -432,7 +447,7 @@ def main():
     mock_port = free_port()
     mock = f"http://127.0.0.1:{mock_port}/"
     mock_server = [sys.executable, str(repo / "tests/mock/server.py")]
-    web_server = [php, "-S", f"127.0.0.1:{web_port}", "-t", root / "p"]
+    web_server = [php, "-d", "opcache.enable=0", "-S", f"127.0.0.1:{web_port}", "-t", root / "p"]
     with server(mock_server, mock + "health", scratch / "mock.log",
                 {**env, "HOST": "127.0.0.1", "PORT": str(mock_port)}):
         run_php(php, [repo / "tests/integration/seed_release.php", root, mock + "feed.xml"], root, env)

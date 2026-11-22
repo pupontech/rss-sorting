@@ -81,6 +81,7 @@ final class ArticleTopicsWorker {
 	private array $config;
 	private float $deadline;
 	private ?ArticleTopicsClassifier $classifier = null;
+	private bool $schemaEnsured = false;
 
 	public function __construct(string $username, array $config, int $seconds = 20) {
 		$this->config = $config;
@@ -103,6 +104,7 @@ final class ArticleTopicsWorker {
 			ArticleTopicsStore::assertNoCategoryCollisions($prefix, $taxonomy);
 			$tagDao = new ArticleTopicsAtomicTagDAO();
 			$tagDao->ensureOwnershipSchema();
+			$this->schemaEnsured = true;
 			$protectExisting = $this->config['protect_existing_labels'] ?? false;
 			if (!$protectExisting) {
 				try {
@@ -114,14 +116,16 @@ final class ArticleTopicsWorker {
 			ArticleTopicsStore::discoverCommitted($this->dir);
 			$state = ArticleTopicsStore::readState($this->dir);
 			$state += ['failures' => [], 'fingerprints' => [], 'cache' => []];
+			$pruned = false;
 			foreach (array_slice(array_keys($state['failures']), 0, 100) as $failedId) {
 				if (microtime(true) >= $this->deadline) { break; }
 				if (FreshRSS_Factory::createEntryDao()->searchById((string)$failedId) === null) {
 					unset($state['failures'][$failedId], $state['fingerprints'][$failedId]);
 					$state['pending'] = array_values(array_filter($state['pending'], static fn($id): bool => (string)$id !== (string)$failedId));
+					$pruned = true;
 				}
 			}
-			ArticleTopicsStore::writeState($this->dir, $state);
+			if ($pruned) { ArticleTopicsStore::writeState($this->dir, $state); }
 			$this->classifier = new ArticleTopicsClassifier($this->config);
 			$allowedNames = $this->classifier->allowedNames($taxonomy);
 			$this->discoverChanged($state, $taxonomy);
@@ -245,25 +249,35 @@ final class ArticleTopicsWorker {
 		$pending = array_fill_keys(array_map('strval', $state['pending']), true);
 		$dao = FreshRSS_Factory::createEntryDao();
 		$profileActive = $this->classifier->hasProfile();
+		$changed = false;
 		foreach ($page as $id) {
 			if (microtime(true) >= $this->deadline) { break; }
+			// Pending entries are checked and cleaned up by the processing loop; avoid
+			// loading and fingerprinting them again during this scan.
+			if (isset($pending[(string)$id])) { continue; }
 			if ((int)($state['failures'][(string)$id]['next_retry_at'] ?? 0) > time()) { continue; }
 			$entry = $dao->searchById((string)$id);
-			if ($entry === null) { unset($state['fingerprints'][(string)$id], $state['failures'][(string)$id]); continue; }
+			if ($entry === null) { unset($state['fingerprints'][(string)$id], $state['failures'][(string)$id]); $changed = true; continue; }
 			// Adopting or editing a feed profile should not relabel the already-read archive.
 			if ($profileActive && $entry->isRead()) { continue; }
 			$key = $this->classifier->cacheKey($this->classifier->inputs($entry), $taxonomy);
-			if (($state['fingerprints'][(string)$id] ?? null) !== $key && !isset($pending[(string)$id])) { $state['pending'][] = (int)$id; $pending[(string)$id] = true; }
+			if (($state['fingerprints'][(string)$id] ?? null) !== $key) { $state['pending'][] = (int)$id; $pending[(string)$id] = true; $changed = true; }
 		}
-		$state['fingerprint_scan_offset'] = ($offset + count($page)) % max(1, count($ids));
-		ArticleTopicsStore::writeState($this->dir, $state);
+		$nextOffset = ($offset + count($page)) % max(1, count($ids));
+		if ($changed || ($state['fingerprint_scan_offset'] ?? null) !== $nextOffset) {
+			$state['fingerprint_scan_offset'] = $nextOffset;
+			ArticleTopicsStore::writeState($this->dir, $state);
+		}
 	}
 
 	public function applyLabels(int $entryId, array $names, string $prefix): void { $this->apply($entryId, $names, $prefix); }
 
 	private function apply(int $entryId, array $names, string $prefix): void {
 		$dao = new ArticleTopicsAtomicTagDAO();
-		$dao->ensureOwnershipSchema(); // DDL is outside the data transaction (MySQL DDL can commit implicitly).
+		if (!$this->schemaEnsured) {
+			$dao->ensureOwnershipSchema(); // DDL is outside the data transaction (MySQL DDL can commit implicitly).
+			$this->schemaEnsured = true;
+		}
 		if ($dao->hasManualOverride((string)$entryId)) { return; }
 		$current = [];
 		foreach ($dao->getTagsForEntry((string)$entryId) as $tag) { if ($tag['checked']) { $current[(int)$tag['id']] = true; } }

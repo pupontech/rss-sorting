@@ -79,7 +79,6 @@ final class ArticleTopicsLlmClient {
 		$body = curl_exec($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 		$ok = is_string($body);
-		curl_close($ch);
 		if (!$ok) { throw new ArticleTopicsProviderError('temporary', 'LLM provider transport failed or exceeded the deadline.'); }
 		return ['status' => $status, 'body' => $body];
 	}

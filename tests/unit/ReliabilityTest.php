@@ -42,3 +42,52 @@ $migrated['failures'] = $state['failures'];
 ArticleTopicsStore::writeState($dir, $migrated);
 $reloaded = ArticleTopicsStore::readState($dir);
 assertSameValue($state['failures'], $reloaded['failures'], 'retry record survives durable state round trip');
+
+// discoverChanged() skips already-pending entries without loading them and avoids no-op state writes.
+$scanConfig = ['enabled' => true, 'mode' => 'keywords', 'api_url' => '', 'model' => ''];
+$scanWorker = new ArticleTopicsWorker('reliability', $scanConfig);
+$classifierProp = new ReflectionProperty(ArticleTopicsWorker::class, 'classifier');
+$classifierProp->setAccessible(true);
+$classifier = new ArticleTopicsClassifier($scanConfig);
+$classifierProp->setValue($scanWorker, $classifier);
+$discoverChanged = new ReflectionMethod(ArticleTopicsWorker::class, 'discoverChanged');
+$discoverChanged->setAccessible(true);
+
+$taxonomy = [['name' => 'Tech', 'enabled' => true, 'positive_keywords' => ['linux' => 2], 'negative_keywords' => [], 'threshold' => 2, 'exclusions' => []]];
+$pendingEntry = new FreshRSS_Entry('Linux kernel update', 'Already queued');
+$changedEntry = new FreshRSS_Entry('Linux desktop release', 'Updated content');
+FreshRSS_Factory::$entryDao->entries = ['101' => $pendingEntry, '102' => $changedEntry];
+FreshRSS_Factory::$entryDao->searchedIds = [];
+
+$scanState = [
+	'schema' => ArticleTopicsStore::SCHEMA,
+	'pending' => [101],
+	'processed_ids' => [101, 102],
+	'failures' => [],
+	'fingerprints' => [
+		'101' => 'stale-pending-key',
+		'102' => 'stale-changed-key',
+	],
+	'cache' => [],
+	'fingerprint_scan_offset' => 0,
+];
+$discoverChanged->invokeArgs($scanWorker, [&$scanState, $taxonomy]);
+assertSameValue(['102'], FreshRSS_Factory::$entryDao->searchedIds, 'discoverChanged skips loading already-pending entries');
+assertSameValue([101, 102], $scanState['pending'], 'discoverChanged queues non-pending entries whose fingerprint changed');
+
+// When nothing changes and offset stays the same, state.json is not rewritten.
+$unchangedKey = $classifier->cacheKey($classifier->inputs($changedEntry), $taxonomy);
+$stableState = $scanState;
+$stableState['pending'] = [101];
+$stableState['fingerprints']['102'] = $unchangedKey;
+$stableState['fingerprint_scan_offset'] = 0;
+ArticleTopicsStore::writeState($dir, $stableState);
+$stateFile = $dir . '/state.json';
+$sentinelTime = time() - 120;
+touch($stateFile, $sentinelTime);
+clearstatcache(true, $stateFile);
+FreshRSS_Factory::$entryDao->searchedIds = [];
+$discoverChanged->invokeArgs($scanWorker, [&$stableState, $taxonomy]);
+clearstatcache(true, $stateFile);
+assertSameValue(['102'], FreshRSS_Factory::$entryDao->searchedIds, 'discoverChanged still checks non-pending entries');
+assertSameValue($sentinelTime, filemtime($stateFile), 'discoverChanged skips writing state.json when nothing changed');

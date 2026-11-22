@@ -98,9 +98,10 @@ $actionUrl = _url('extension', 'configure', 'e', urlencode($this->getName()));
 				<p class="article-topics-help" id="article-topics-model-status" role="status"></p>
 			</div>
 			<div class="article-topics-model-row">
-				<button type="submit" class="btn" name="admin_action" value="health_check" aria-describedby="article-topics-provider-help">Check provider</button>
+				<button type="submit" class="btn" form="article-topics-provider-check" aria-describedby="article-topics-provider-help">Check provider</button>
 				<p class="article-topics-help" id="article-topics-provider-help">Tests your saved connection.</p>
 			</div>
+			<p id="article-topics-provider-status" role="status"></p>
 		</section>
 
 		<?php if ($this->profileError !== ''): ?>
@@ -160,6 +161,10 @@ $actionUrl = _url('extension', 'configure', 'e', urlencode($this->getName()));
 			</div>
 		</details>
 		<div class="article-topics-save"><button type="submit" class="btn btn-important">Save settings</button></div>
+	</form>
+	<form id="article-topics-provider-check" action="<?= $actionUrl ?>" method="post">
+		<input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" />
+		<input type="hidden" name="admin_action" value="health_check" />
 	</form>
 
 	<section class="article-topics-section article-topics-stack" aria-labelledby="article-topics-preview">

@@ -149,7 +149,7 @@ final class ArticleTopicsAdmin {
 		if ($payload !== null) {
 			curl_setopt_array($ch, [CURLOPT_POST=>true, CURLOPT_POSTFIELDS=>json_encode($payload, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR)]);
 		}
-		$body = curl_exec($ch); $status = (int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE); $ok = is_string($body); curl_close($ch);
+		$body = curl_exec($ch); $status = (int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE); $ok = is_string($body);
 		if (!$ok) { throw new RuntimeException('Provider connection failed or exceeded the 3 second limit.'); }
 		return ['status'=>$status,'body'=>$body];
 	}
